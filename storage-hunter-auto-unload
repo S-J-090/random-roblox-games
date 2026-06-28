@@ -94,6 +94,7 @@ local function autoSeatInVehicle(vehicle)
 
 	local targetPrompt = nil
 	local targetSeat = nil
+
 	for _, desc in ipairs(vehicle:GetDescendants()) do
 		if desc:IsA("VehicleSeat") or desc:IsA("Seat") then
 			if desc.Occupant == nil then
@@ -103,6 +104,7 @@ local function autoSeatInVehicle(vehicle)
 			end
 		end
 	end
+
 	if not targetPrompt then
 		for _, desc in ipairs(vehicle:GetDescendants()) do
 			if desc:IsA("ProximityPrompt") then
@@ -117,35 +119,38 @@ local function autoSeatInVehicle(vehicle)
 			end
 		end
 	end
+
 	if not targetSeat then
 		targetSeat = vehicle:FindFirstChildWhichIsA("VehicleSeat", true) or vehicle:FindFirstChildWhichIsA("Seat", true)
 	end
 
 	if not targetSeat then
-		warn("[AutoUnload] No seat found inside your vehicle model.")
+		warn("[AutoUnload] No seat found inside vehicle model.")
 		return false
 	end
 	hrp.CFrame = targetSeat.CFrame * CFrame.new(0, 2, 0)
-	task.wait(0.3)
+	task.wait(0.2)
+
 	if targetPrompt and targetPrompt.Enabled then
 		pcall(function()
 			targetPrompt:InputHoldBegin()
-			task.wait(0.2)
+			task.wait(0.15)
 			targetPrompt:InputHoldEnd()
 		end)
 	end
-	local timeout = 2.5
+
+	local timeout = 2.0
 	local startTime = os.clock()
 	while os.clock() - startTime < timeout do
 		if humanoid.SeatPart == targetSeat then
 			return true
 		end
-		if os.clock() - startTime > 0.8 and humanoid.SeatPart ~= targetSeat then
+		if os.clock() - startTime > 0.5 and humanoid.SeatPart ~= targetSeat then
 			pcall(function()
 				targetSeat:Sit(humanoid)
 			end)
 		end
-		task.wait(0.1)
+		task.wait(0.05)
 	end
 
 	return humanoid.SeatPart ~= nil
@@ -165,21 +170,33 @@ local function autoUnloadVehicle()
 	if not zoneCFrame then
 		return 0, "Can't find unload zone!"
 	end
+	
 	local vehicle = findMyVehicle()
 	if not vehicle then
 		return 0, "Vehicle not in workspace!"
 	end
+
+	local character = LocalPlayer.Character
+	local hrp = character and character:FindFirstChild("HumanoidRootPart")
+	if not hrp then return 0, "Character missing!" end
 	local wasSeated = isSeatedInOwnVehicle()
 	if not wasSeated then
+		local targetCFrame = zoneCFrame + Vector3.new(0, 3, 0)
+		hrp.CFrame = targetCFrame
+		task.wait(0.4)
+
+		vehicle:PivotTo(targetCFrame)
+		task.wait(0.4)
 		local seated = autoSeatInVehicle(vehicle)
 		if not seated then
 			return 0, "Could not enter vehicle!"
 		end
-		task.wait(0.5)
+		task.wait(0.3)
+	else
+		local targetCFrame = zoneCFrame + Vector3.new(0, 3, 0)
+		vehicle:PivotTo(targetCFrame)
+		task.wait(1.5)
 	end
-	local targetCFrame = zoneCFrame + Vector3.new(0, 3, 0)
-	vehicle:PivotTo(targetCFrame)
-	task.wait(1.5)
 	local ok, items = pcall(function()
 		return GetVehicleItems:InvokeServer(vehicleGUID)
 	end)
@@ -203,7 +220,7 @@ local function autoUnloadVehicle()
 			return a.price > b.price
 		end
 		local nameA = tostring(a.entry and a.entry.Name or (a.entry and a.entry.ItemId or a.guid))
-		local nameB = tostring(b.entry and b.entry.Name or (b.entry and b.entry.ItemId or b.guid))
+		local nameB = tostring(b.entry and b.entry.Name or (b.entry and b.entry.ItemId or a.guid))
 		return nameA < nameB
 	end)
 	local inventoryCap = LocalPlayer:GetAttribute("InventoryCap") or 0
