@@ -8,6 +8,7 @@ local TransferVehicleItemsToInventory = VehiclesFolder:WaitForChild("TransferVeh
 local PlotFolder = ReplicatedStorage:WaitForChild("Events"):WaitForChild("Plot")
 local RequestPlotData = PlotFolder:WaitForChild("RequestPlotData")
 local ItemGridPanel
+
 local moduleScript = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ItemGridPanel")
 local ok, loadmodule = pcall(function() return debug.loadmodule end)
 if ok and loadmodule then
@@ -27,6 +28,7 @@ if not ItemGridPanel then
         warn("Could not securely bind ItemGridPanel. Base prices will default.")
     end
 end
+
 local function getPlotData()
 	local ok, result = pcall(function()
 		return RequestPlotData:InvokeServer()
@@ -36,6 +38,7 @@ local function getPlotData()
 	end
 	return nil
 end
+
 local function getUnpackZoneCFrame(plotData)
 	if not plotData then return nil end
 	local rotY = math.rad(plotData.RotationY or 0)
@@ -43,6 +46,7 @@ local function getUnpackZoneCFrame(plotData)
 	local zonePosition = originCFrame:PointToWorldSpace(Vector3.new(0, 0, -100))
 	return CFrame.new(zonePosition) * CFrame.Angles(0, rotY, 0)
 end
+
 local function findMyVehicle()
 	local vehicleGUID = LocalPlayer:GetAttribute("EquippedVehicle")
 	if not vehicleGUID or vehicleGUID == "" then
@@ -57,6 +61,7 @@ local function findMyVehicle()
 	end
 	return nil
 end
+
 local function isSeatedInOwnVehicle()
 	local character = LocalPlayer.Character
 	if not character then return false end
@@ -68,6 +73,7 @@ local function isSeatedInOwnVehicle()
 	if not vehicleModel then return false end
 	return vehicleModel:GetAttribute("VehicleGUID") == LocalPlayer:GetAttribute("EquippedVehicle")
 end
+
 local function computeEntryPrice(entry)
 	if ItemGridPanel.ComputeEntryPrice then
 		local ok, price = pcall(function()
@@ -79,86 +85,72 @@ local function computeEntryPrice(entry)
 	end
 	return entry.BasePrice or 0
 end
-local function findDriveSeat(vehicle)
-	if not vehicle then return nil end
-	local seat = vehicle:FindFirstChild("DriveSeat")
-	if seat and seat:IsA("VehicleSeat") then
-		return seat
-	end
-	for _, desc in ipairs(vehicle:GetDescendants()) do
-		if desc:IsA("VehicleSeat") then
-			return desc
-		end
-	end
-	return nil
-end
-
-local function findVehiclePrompt(vehicle)
-	if not vehicle then return nil end
-	local driveSeat = findDriveSeat(vehicle)
-	if driveSeat then
-		for _, child in ipairs(driveSeat:GetChildren()) do
-			if child:IsA("ProximityPrompt") then
-				return child
-			end
-		end
-	end
-	for _, desc in ipairs(vehicle:GetDescendants()) do
-		if desc:IsA("ProximityPrompt") and desc.Name == "VehiclePrompt" then
-			return desc
-		end
-	end
-	for _, desc in ipairs(vehicle:GetDescendants()) do
-		if desc:IsA("ProximityPrompt") then
-			return desc
-		end
-	end
-	return nil
-end
-
 local function autoSeatInVehicle(vehicle)
 	local character = LocalPlayer.Character
 	if not character then return false end
-	local humanoid = character:FindFirstChild("Humanoid")
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	local hrp = character:FindFirstChild("HumanoidRootPart")
-	if not humanoid or not hrp then return false end
+	if not humanoid or humanoid.Health <= 0 or not hrp then return false end
 
-	local driveSeat = findDriveSeat(vehicle)
-	if not driveSeat then return false end
-	local prompt = findVehiclePrompt(vehicle)
-	if not prompt then
-		warn("[AutoUnload] No ProximityPrompt found on vehicle")
+	local targetPrompt = nil
+	local targetSeat = nil
+	for _, desc in ipairs(vehicle:GetDescendants()) do
+		if desc:IsA("VehicleSeat") or desc:IsA("Seat") then
+			if desc.Occupant == nil then
+				targetSeat = desc
+				targetPrompt = desc:FindFirstChildOfClass("ProximityPrompt")
+				if targetPrompt then break end
+			end
+		end
+	end
+	if not targetPrompt then
+		for _, desc in ipairs(vehicle:GetDescendants()) do
+			if desc:IsA("ProximityPrompt") then
+				targetPrompt = desc
+				if not targetSeat then
+					local parent = desc.Parent
+					if parent and (parent:IsA("Seat") or parent:IsA("VehicleSeat")) then
+						targetSeat = parent
+					end
+				end
+				break
+			end
+		end
+	end
+	if not targetSeat then
+		targetSeat = vehicle:FindFirstChildWhichIsA("VehicleSeat", true) or vehicle:FindFirstChildWhichIsA("Seat", true)
+	end
+
+	if not targetSeat then
+		warn("[AutoUnload] No seat found inside your vehicle model.")
 		return false
 	end
-	local wasEnabled = prompt.Enabled
-	prompt.Enabled = true
-	local promptRange = prompt.MaxActivationDistance
-	local seatCFrame = driveSeat.CFrame
-	hrp.CFrame = seatCFrame * CFrame.new(0, 0, -promptRange + 2)
-	task.wait(1)
-	local holdDuration = prompt.HoldDuration or 0
-	prompt:InputHoldBegin()
-	if holdDuration > 0 then
-		task.wait(holdDuration + 0.1)
-	else
-		task.wait(0.1)
+	hrp.CFrame = targetSeat.CFrame * CFrame.new(0, 2, 0)
+	task.wait(0.3)
+	if targetPrompt and targetPrompt.Enabled then
+		pcall(function()
+			targetPrompt:InputHoldBegin()
+			task.wait(0.2)
+			targetPrompt:InputHoldEnd()
+		end)
 	end
-	prompt:InputHoldEnd()
-
-	if not wasEnabled then
-		prompt.Enabled = wasEnabled
-	end
-	local timeout = 3
+	local timeout = 2.5
 	local startTime = os.clock()
 	while os.clock() - startTime < timeout do
-		if humanoid.SeatPart == driveSeat then
+		if humanoid.SeatPart == targetSeat then
 			return true
+		end
+		if os.clock() - startTime > 0.8 and humanoid.SeatPart ~= targetSeat then
+			pcall(function()
+				targetSeat:Sit(humanoid)
+			end)
 		end
 		task.wait(0.1)
 	end
 
-	return humanoid.SeatPart == driveSeat
+	return humanoid.SeatPart ~= nil
 end
+
 local function autoUnloadVehicle()
 	local vehicleGUID = LocalPlayer:GetAttribute("EquippedVehicle")
 	if not vehicleGUID or vehicleGUID == "" then
@@ -243,6 +235,7 @@ local function autoUnloadVehicle()
 		return unloaded, "Unloaded " .. unloaded .. " item" .. (unloaded ~= 1 and "s" or "") .. "!"
 	end
 end
+
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AutoUnloadVehicleGui"
 screenGui.ResetOnSpawn = false
