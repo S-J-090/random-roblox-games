@@ -1,0 +1,306 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local VehiclesFolder = ReplicatedStorage:WaitForChild("Events"):WaitForChild("Vehicles")
+local GetVehicleItems = VehiclesFolder:WaitForChild("GetVehicleItems")
+local TransferVehicleItemsToInventory = VehiclesFolder:WaitForChild("TransferVehicleItemsToInventory")
+local PlotFolder = ReplicatedStorage:WaitForChild("Events"):WaitForChild("Plot")
+local RequestPlotData = PlotFolder:WaitForChild("RequestPlotData")
+local ItemGridPanel
+local moduleScript = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Utils"):WaitForChild("ItemGridPanel")
+local ok, loadmodule = pcall(function() return debug.loadmodule end)
+if ok and loadmodule then
+    local success, moduleFunc = pcall(loadmodule, moduleScript)
+    if success and type(moduleFunc) == "function" then
+        ItemGridPanel = moduleFunc()
+    end
+end
+if not ItemGridPanel then
+    local okModule, res = pcall(function()
+        return getrenv().require(moduleScript)
+    end)
+    if okModule then
+        ItemGridPanel = res
+    else
+        ItemGridPanel = {}
+        warn("Could not securely bind ItemGridPanel. Base prices will default.")
+    end
+end
+local function getPlotData()
+	local ok, result = pcall(function()
+		return RequestPlotData:InvokeServer()
+	end)
+	if ok and result then
+		return result
+	end
+	return nil
+end
+local function getUnpackZoneCFrame(plotData)
+	if not plotData then return nil end
+	local rotY = math.rad(plotData.RotationY or 0)
+	local originCFrame = CFrame.new(plotData.OriginX, plotData.OriginY, plotData.OriginZ) * CFrame.Angles(0, rotY, 0)
+	-- Unpack zone is 100 studs in front of the plot origin (negative Z in local space)
+	local zonePosition = originCFrame:PointToWorldSpace(Vector3.new(0, 0, -100))
+	return CFrame.new(zonePosition) * CFrame.Angles(0, rotY, 0)
+end
+local function findMyVehicle()
+	local vehicleGUID = LocalPlayer:GetAttribute("EquippedVehicle")
+	if not vehicleGUID or vehicleGUID == "" then
+		return nil
+	end
+	for _, desc in ipairs(workspace:GetDescendants()) do
+		if desc:IsA("Model")
+			and desc:GetAttribute("VehicleGUID") == vehicleGUID
+			and desc:GetAttribute("OwnerUserId") == LocalPlayer.UserId then
+			return desc
+		end
+	end
+	return nil
+end
+local function isSeatedInOwnVehicle()
+	local character = LocalPlayer.Character
+	if not character then return false end
+	local humanoid = character:FindFirstChild("Humanoid")
+	if not humanoid then return false end
+	local seatPart = humanoid.SeatPart
+	if not seatPart or not seatPart:IsA("VehicleSeat") then return false end
+	local vehicleModel = seatPart:FindFirstAncestorOfClass("Model")
+	if not vehicleModel then return false end
+	return vehicleModel:GetAttribute("VehicleGUID") == LocalPlayer:GetAttribute("EquippedVehicle")
+end
+local function computeEntryPrice(entry)
+	if ItemGridPanel.ComputeEntryPrice then
+		local ok, price = pcall(function()
+			return ItemGridPanel.ComputeEntryPrice(entry)
+		end)
+		if ok and type(price) == "number" then
+			return price
+		end
+	end
+	return entry.BasePrice or 0
+end
+local function findDriveSeat(vehicle)
+	if not vehicle then return nil end
+	local seat = vehicle:FindFirstChild("DriveSeat")
+	if seat and seat:IsA("VehicleSeat") then
+		return seat
+	end
+	for _, desc in ipairs(vehicle:GetDescendants()) do
+		if desc:IsA("VehicleSeat") then
+			return desc
+		end
+	end
+	return nil
+end
+
+local function findVehiclePrompt(vehicle)
+	if not vehicle then return nil end
+	local driveSeat = findDriveSeat(vehicle)
+	if driveSeat then
+		for _, child in ipairs(driveSeat:GetChildren()) do
+			if child:IsA("ProximityPrompt") then
+				return child
+			end
+		end
+	end
+	for _, desc in ipairs(vehicle:GetDescendants()) do
+		if desc:IsA("ProximityPrompt") and desc.Name == "VehiclePrompt" then
+			return desc
+		end
+	end
+	for _, desc in ipairs(vehicle:GetDescendants()) do
+		if desc:IsA("ProximityPrompt") then
+			return desc
+		end
+	end
+	return nil
+end
+
+local function autoSeatInVehicle(vehicle)
+	local character = LocalPlayer.Character
+	if not character then return false end
+	local humanoid = character:FindFirstChild("Humanoid")
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not hrp then return false end
+
+	local driveSeat = findDriveSeat(vehicle)
+	if not driveSeat then return false end
+	local prompt = findVehiclePrompt(vehicle)
+	if not prompt then
+		warn("[AutoUnload] No ProximityPrompt found on vehicle")
+		return false
+	end
+	local wasEnabled = prompt.Enabled
+	prompt.Enabled = true
+	local promptRange = prompt.MaxActivationDistance
+	local seatCFrame = driveSeat.CFrame
+	hrp.CFrame = seatCFrame * CFrame.new(0, 0, -promptRange + 2)
+	task.wait(1)
+	local holdDuration = prompt.HoldDuration or 0
+	prompt:InputHoldBegin()
+	if holdDuration > 0 then
+		task.wait(holdDuration + 0.1)
+	else
+		task.wait(0.1)
+	end
+	prompt:InputHoldEnd()
+
+	if not wasEnabled then
+		prompt.Enabled = wasEnabled
+	end
+	local timeout = 3
+	local startTime = os.clock()
+	while os.clock() - startTime < timeout do
+		if humanoid.SeatPart == driveSeat then
+			return true
+		end
+		task.wait(0.1)
+	end
+
+	return humanoid.SeatPart == driveSeat
+end
+local function autoUnloadVehicle()
+	local vehicleGUID = LocalPlayer:GetAttribute("EquippedVehicle")
+	if not vehicleGUID or vehicleGUID == "" then
+		return 0, "No equipped vehicle!"
+	end
+	local plotData = getPlotData()
+	if not plotData then
+		return 0, "No plot data!"
+	end
+
+	local zoneCFrame = getUnpackZoneCFrame(plotData)
+	if not zoneCFrame then
+		return 0, "Can't find unload zone!"
+	end
+	local vehicle = findMyVehicle()
+	if not vehicle then
+		return 0, "Vehicle not in workspace!"
+	end
+	local wasSeated = isSeatedInOwnVehicle()
+	if not wasSeated then
+		local seated = autoSeatInVehicle(vehicle)
+		if not seated then
+			return 0, "Could not enter vehicle!"
+		end
+		task.wait(0.5)
+	end
+	local targetCFrame = zoneCFrame + Vector3.new(0, 3, 0)
+	vehicle:PivotTo(targetCFrame)
+	task.wait(1.5)
+	local ok, items = pcall(function()
+		return GetVehicleItems:InvokeServer(vehicleGUID)
+	end)
+	if not ok or type(items) ~= "table" then
+		return 0, "Could not get vehicle items!"
+	end
+	local allItems = {}
+	for guid, entry in pairs(items) do
+		table.insert(allItems, {
+			guid = guid,
+			entry = entry,
+			price = computeEntryPrice(entry),
+		})
+	end
+
+	if #allItems == 0 then
+		return 0, "Vehicle is empty!"
+	end
+	table.sort(allItems, function(a, b)
+		if a.price ~= b.price then
+			return a.price > b.price
+		end
+		local nameA = tostring(a.entry and a.entry.Name or (a.entry and a.entry.ItemId or a.guid))
+		local nameB = tostring(b.entry and b.entry.Name or (b.entry and b.entry.ItemId or b.guid))
+		return nameA < nameB
+	end)
+	local inventoryCap = LocalPlayer:GetAttribute("InventoryCap") or 0
+	local inventoryCount = LocalPlayer:GetAttribute("InventoryCount") or 0
+	local freeSlots = math.max(0, inventoryCap - inventoryCount)
+
+	local selectedGuids = {}
+	for i, item in ipairs(allItems) do
+		if #selectedGuids >= freeSlots then break end
+		table.insert(selectedGuids, item.guid)
+	end
+
+	if #selectedGuids == 0 then
+		return 0, "No inventory space!"
+	end
+
+	-- Step 11: Fire the unload remote
+	local success, err = pcall(function()
+		TransferVehicleItemsToInventory:FireServer(selectedGuids)
+	end)
+
+	if not success then
+		return 0, "Unload failed!"
+	end
+
+	local unloaded = #selectedGuids
+	local remaining = #allItems - #selectedGuids
+	if remaining > 0 then
+		return unloaded, "Unloaded " .. unloaded .. " (" .. remaining .. " left - no space)"
+	else
+		return unloaded, "Unloaded " .. unloaded .. " item" .. (unloaded ~= 1 and "s" or "") .. "!"
+	end
+end
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AutoUnloadVehicleGui"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.DisplayOrder = 50
+screenGui.Parent = PlayerGui
+
+local button = Instance.new("TextButton")
+button.Name = "AutoUnloadBtn"
+button.Size = UDim2.new(0, 150, 0, 44)
+button.Position = UDim2.new(1, -165, 0, 130)
+button.BackgroundColor3 = Color3.fromRGB(46, 100, 180)
+button.BackgroundTransparency = 0.15
+button.BorderSizePixel = 0
+button.Font = Enum.Font.GothamBold
+button.Text = "Auto Unload"
+button.TextColor3 = Color3.new(1, 1, 1)
+button.TextSize = 15
+button.AutoButtonColor = true
+button.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = button
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(255, 255, 255)
+stroke.Transparency = 0.7
+stroke.Thickness = 1.5
+stroke.Parent = button
+
+local isRunning = false
+
+button.MouseButton1Click:Connect(function()
+	if isRunning then return end
+	isRunning = true
+	button.Text = "Unloading..."
+	button.BackgroundColor3 = Color3.fromRGB(200, 150, 30)
+	button.AutoButtonColor = false
+
+	task.spawn(function()
+		local count, message = autoUnloadVehicle()
+
+		button.Text = message
+		if count > 0 then
+			button.BackgroundColor3 = Color3.fromRGB(30, 120, 200)
+		else
+			button.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+		end
+
+		task.wait(2.5)
+
+		button.Text = "Auto Unload"
+		button.BackgroundColor3 = Color3.fromRGB(46, 100, 180)
+		button.AutoButtonColor = true
+		isRunning = false
+	end)
+end)
