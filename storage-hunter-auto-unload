@@ -92,68 +92,41 @@ local function autoSeatInVehicle(vehicle)
 	local hrp = character:FindFirstChild("HumanoidRootPart")
 	if not humanoid or humanoid.Health <= 0 or not hrp then return false end
 
-	local targetPrompt = nil
 	local targetSeat = nil
-
 	for _, desc in ipairs(vehicle:GetDescendants()) do
-		if desc:IsA("VehicleSeat") or desc:IsA("Seat") then
-			if desc.Occupant == nil then
-				targetSeat = desc
-				targetPrompt = desc:FindFirstChildOfClass("ProximityPrompt")
-				if targetPrompt then break end
-			end
-		end
-	end
-
-	if not targetPrompt then
-		for _, desc in ipairs(vehicle:GetDescendants()) do
-			if desc:IsA("ProximityPrompt") then
-				targetPrompt = desc
-				if not targetSeat then
-					local parent = desc.Parent
-					if parent and (parent:IsA("Seat") or parent:IsA("VehicleSeat")) then
-						targetSeat = parent
-					end
-				end
-				break
-			end
+		if (desc:IsA("VehicleSeat") or desc:IsA("Seat")) and desc.Occupant == nil then
+			targetSeat = desc
+			break
 		end
 	end
 
 	if not targetSeat then
-		targetSeat = vehicle:FindFirstChildWhichIsA("VehicleSeat", true) or vehicle:FindFirstChildWhichIsA("Seat", true)
-	end
-
-	if not targetSeat then
-		warn("[AutoUnload] No seat found inside vehicle model.")
+		warn("[AutoUnload] No open seat found inside vehicle model.")
 		return false
 	end
-	hrp.CFrame = targetSeat.CFrame * CFrame.new(0, 2, 0)
-	task.wait(0.2)
 
-	if targetPrompt and targetPrompt.Enabled then
-		pcall(function()
-			targetPrompt:InputHoldBegin()
-			task.wait(0.15)
-			targetPrompt:InputHoldEnd()
-		end)
-	end
+	hrp.CFrame = targetSeat.CFrame * CFrame.new(0, 1.5, 0)
+	task.wait(0.1)
 
+	pcall(function()
+		targetSeat:Sit(humanoid)
+	end)
 	local timeout = 2.0
 	local startTime = os.clock()
 	while os.clock() - startTime < timeout do
 		if humanoid.SeatPart == targetSeat then
 			return true
 		end
-		if os.clock() - startTime > 0.5 and humanoid.SeatPart ~= targetSeat then
+		if os.clock() - startTime > 0.6 and humanoid.SeatPart ~= targetSeat then
 			pcall(function()
 				targetSeat:Sit(humanoid)
 			end)
+			task.wait(0.2)
 		end
 		task.wait(0.05)
 	end
 
-	return humanoid.SeatPart ~= nil
+	return humanoid.SeatPart == targetSeat
 end
 
 local function autoUnloadVehicle()
