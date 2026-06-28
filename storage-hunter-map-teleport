@@ -1,0 +1,76 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local isAutoWalking = false
+local cancelToken = 0
+
+local function autoWalkToDestination(destination)
+	cancelToken = cancelToken + 1
+	local myToken = cancelToken
+
+	local function isCurrentWalk()
+		return isAutoWalking and cancelToken == myToken
+	end
+
+	local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	local hrp = character:WaitForChild("HumanoidRootPart", 5)
+	if not hrp then return end
+
+	isAutoWalking = true
+
+	if isCurrentWalk() then
+		local currentChar = LocalPlayer.Character
+		local currentHrp = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
+		local currentHumanoid = currentChar and currentChar:FindFirstChildOfClass("Humanoid")
+
+		if currentHrp and (not currentHumanoid or currentHumanoid.Health > 0) then
+			currentHrp.CFrame = CFrame.new(destination + Vector3.new(0, 3, 0))
+		end
+	end
+
+	isAutoWalking = false
+end
+
+local function stopAutoWalk()
+	isAutoWalking = false
+	cancelToken = cancelToken + 1
+end
+
+local function findEvent(eventName)
+	return LocalPlayer:FindFirstChild(eventName) 
+		or ReplicatedStorage:FindFirstChild(eventName) 
+		or LocalPlayer.PlayerGui:FindFirstChild(eventName, true)
+end
+
+task.spawn(function()
+	while true do
+		local startEvent = findEvent("StartGPSNavigation")
+		if startEvent and startEvent:IsA("BindableEvent") then
+			startEvent.Event:Connect(function(name, position)
+				if position then task.spawn(autoWalkToDestination, position) end
+			end)
+			break
+		end
+		task.wait(1)
+	end
+end)
+
+task.spawn(function()
+	while true do
+		local stopEvent = findEvent("StopGPSNavigation")
+		if stopEvent and stopEvent:IsA("BindableEvent") then
+			stopEvent.Event:Connect(stopAutoWalk)
+			break
+		end
+		task.wait(1)
+	end
+end)
+
+_G.AutoWalk = function(pos)
+	task.spawn(autoWalkToDestination, pos)
+end
+
+_G.StopWalk = function()
+	stopAutoWalk()
+end
