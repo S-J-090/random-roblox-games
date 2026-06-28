@@ -40,7 +40,6 @@ local function getUnpackZoneCFrame(plotData)
 	if not plotData then return nil end
 	local rotY = math.rad(plotData.RotationY or 0)
 	local originCFrame = CFrame.new(plotData.OriginX, plotData.OriginY, plotData.OriginZ) * CFrame.Angles(0, rotY, 0)
-	-- Unpack zone is 100 studs in front of the plot origin (negative Z in local space)
 	local zonePosition = originCFrame:PointToWorldSpace(Vector3.new(0, 0, -100))
 	return CFrame.new(zonePosition) * CFrame.Angles(0, rotY, 0)
 end
@@ -228,8 +227,6 @@ local function autoUnloadVehicle()
 	if #selectedGuids == 0 then
 		return 0, "No inventory space!"
 	end
-
-	-- Step 11: Fire the unload remote
 	local success, err = pcall(function()
 		TransferVehicleItemsToInventory:FireServer(selectedGuids)
 	end)
