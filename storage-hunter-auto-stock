@@ -1,0 +1,179 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local GetPlayerInventory = ReplicatedStorage:WaitForChild("Events"):WaitForChild("Inventory"):WaitForChild("GetPlayerInventory")
+local PlaceStockItem = ReplicatedStorage:WaitForChild("Events"):WaitForChild("Plot"):WaitForChild("PlaceStockItem")
+local _Plots = workspace:WaitForChild("_Plots")
+local function findMyPlot()
+    for _, plot in ipairs(_Plots:GetChildren()) do
+        if plot:IsA("Folder") and plot:GetAttribute("OwnerUserId") == LocalPlayer.UserId then
+            return plot
+        end
+    end
+    return nil
+end
+
+local function getAvailableSnaps(shelfModel, plot)
+    local shelfGUID = shelfModel:GetAttribute("GUID")
+    local occupied = {}
+
+    local Stock = plot:FindFirstChild("Stock")
+    if Stock then
+        for _, stockItem in ipairs(Stock:GetChildren()) do
+            if stockItem:GetAttribute("ShelfGUID") == shelfGUID then
+                local snapName = stockItem:GetAttribute("SnapPointName")
+                if snapName then
+                    occupied[snapName] = true
+                end
+            end
+        end
+    end
+
+    local available = {}
+    for _, desc in ipairs(shelfModel:GetDescendants()) do
+        if desc:IsA("Attachment") and desc.Name:match("^SnapPoint") and not occupied[desc.Name] then
+            table.insert(available, desc)
+        end
+    end
+
+    return available
+end
+local function autoStockShelves()
+    local plot = findMyPlot()
+    if not plot then
+        return 0, "No plot found!"
+    end
+
+    local FurnitureFolder = plot:FindFirstChild("Furniture")
+    if not FurnitureFolder then
+        return 0, "No furniture on plot!"
+    end
+
+    local ok, inventory = pcall(function()
+        return GetPlayerInventory:InvokeServer()
+    end)
+    if not ok or not inventory then
+        return 0, "Could not load inventory!"
+    end
+    local availableItems = {}
+    for key, entry in pairs(inventory) do
+        if entry.Favorited ~= true then
+            table.insert(availableItems, { guid = key, entry = entry })
+        end
+    end
+
+    if #availableItems == 0 then
+        return 0, "No unfavorited items!"
+    end
+    local allSlots = {}
+    for _, furniture in ipairs(FurnitureFolder:GetChildren()) do
+        if furniture:GetAttribute("IsShelf") then
+            local snaps = getAvailableSnaps(furniture, plot)
+            for _, snap in ipairs(snaps) do
+                table.insert(allSlots, { shelf = furniture, snap = snap })
+            end
+        end
+    end
+
+    if #allSlots == 0 then
+        return 0, "No empty shelf slots!"
+    end
+
+    local placed = 0
+    local usedItems = {}
+    for _, slotInfo in ipairs(allSlots) do
+        local shelfModel = slotInfo.shelf
+        local snapAttachment = slotInfo.snap
+        local shelfGUID = shelfModel:GetAttribute("GUID")
+
+        for i, item in ipairs(availableItems) do
+            if usedItems[item.guid] then continue end
+
+            local entry = item.entry
+            local itemId = tostring(entry.ItemId)
+            local cframe = snapAttachment.WorldCFrame * CFrame.Angles(0, math.rad(0), 0)
+            local price = entry.BasePrice or 100 
+
+            PlaceStockItem:FireServer(
+                item.guid,       
+                itemId,      
+                cframe,       
+                price,            
+                shelfGUID,    
+                snapAttachment.Name 
+            )
+
+            usedItems[item.guid] = true
+            placed = placed + 1
+            task.wait(0.15)
+            break 
+        end
+    end
+
+    if placed > 0 then
+        return placed, "Placed " .. placed .. " item" .. (placed ~= 1 and "s" or "") .. "!"
+    else
+        return 0, "No items fit any slots!"
+    end
+end
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AutoStockShelvesGui"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.DisplayOrder = 50
+screenGui.Parent = PlayerGui
+
+local button = Instance.new("TextButton")
+button.Name = "AutoStockBtn"
+button.Size = UDim2.new(0, 150, 0, 44)
+button.Position = UDim2.new(1, -165, 0, 80)
+button.BackgroundColor3 = Color3.fromRGB(46, 137, 55)
+button.BackgroundTransparency = 0.15
+button.BorderSizePixel = 0
+button.Font = Enum.Font.GothamBold
+button.Text = "Auto Stock"
+button.TextColor3 = Color3.new(1, 1, 1)
+button.TextSize = 15
+button.AutoButtonColor = true
+button.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = button
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(255, 255, 255)
+stroke.Transparency = 0.7
+stroke.Thickness = 1.5
+stroke.Parent = button
+
+local isRunning = false
+
+button.MouseButton1Click:Connect(function()
+    if isRunning then return end
+    isRunning = true
+    button.Text = "Stocking..."
+    button.BackgroundColor3 = Color3.fromRGB(200, 150, 30)
+    button.AutoButtonColor = false
+
+    task.spawn(function()
+        local count, message = autoStockShelves()
+
+        button.Text = message
+        if count > 0 then
+            button.BackgroundColor3 = Color3.fromRGB(30, 120, 200)
+        else
+            button.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+        end
+
+        task.wait(2.5)
+
+        button.Text = "Auto Stock"
+        button.BackgroundColor3 = Color3.fromRGB(46, 137, 55)
+        button.AutoButtonColor = true
+        isRunning = false
+    end)
+end)
