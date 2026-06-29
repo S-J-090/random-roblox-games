@@ -1,0 +1,45 @@
+local Workspace = game:GetService("Workspace")
+
+local crystalsFolder = Workspace:FindFirstChild("Things") 
+    and Workspace.Things:FindFirstChild("Crystals")
+
+local LEGENDARY_COLOR = Color3.fromRGB(255, 128, 0)
+
+local function highlightPart(part)
+    if not (part:IsA("BasePart") or part:IsA("MeshPart")) then return end
+    
+    local oldHighlight = part:FindFirstChild("TierHighlight")
+    if oldHighlight then oldHighlight:Destroy() end
+
+    local tierName = part:GetAttribute("TierName")
+    if tierName == "Legendary" then
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "TierHighlight"
+        highlight.FillColor = LEGENDARY_COLOR
+        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+        highlight.FillTransparency = 0.5
+        highlight.OutlineTransparency = 0
+        highlight.Adornee = part
+        highlight.Parent = part
+    end
+end
+
+local function scanAll()
+    if not crystalsFolder then return end
+    for _, part in ipairs(crystalsFolder:GetChildren()) do
+        highlightPart(part)
+    end
+end
+
+if crystalsFolder then
+    scanAll()
+
+    crystalsFolder.ChildAdded:Connect(function(child)
+        task.wait(0.1)
+        highlightPart(child)
+    end)
+
+    crystalsFolder.ChildRemoved:Connect(function()
+        scanAll()
+    end)
+end
