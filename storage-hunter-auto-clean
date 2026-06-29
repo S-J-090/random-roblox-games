@@ -1,0 +1,141 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local WashFolder = ReplicatedStorage:WaitForChild("Events"):WaitForChild("Wash")
+local GetSlotState = WashFolder:WaitForChild("GetSlotState")
+local GetWashableItems = WashFolder:WaitForChild("GetWashableItems")
+local StartWash = WashFolder:WaitForChild("StartWash")
+local CollectWash = WashFolder:WaitForChild("CollectWash")
+local ClaimWashedItem = WashFolder:WaitForChild("ClaimWashedItem")
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AutoCleanGui"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.DisplayOrder = 50
+screenGui.Parent = PlayerGui
+
+local button = Instance.new("TextButton")
+button.Name = "AutoCleanBtn"
+button.Size = UDim2.new(0, 150, 0, 44)
+button.Position = UDim2.new(1, -165, 0, 178)
+button.BackgroundColor3 = Color3.fromRGB(46, 100, 180)
+button.BackgroundTransparency = 0.15
+button.BorderSizePixel = 0
+button.Font = Enum.Font.GothamBold
+button.Text = "Auto Clean"
+button.TextColor3 = Color3.new(1, 1, 1)
+button.TextSize = 15
+button.AutoButtonColor = true
+button.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = button
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(255, 255, 255)
+stroke.Transparency = 0.7
+stroke.Thickness = 1.5
+stroke.Parent = button
+
+local isActive = false
+local shouldStop = false
+
+local function setButtonState(running)
+    isActive = running
+    button.Text = running and "Auto Clean " or "Auto Clean"
+    button.BackgroundColor3 = running and Color3.fromRGB(30, 150, 80) or Color3.fromRGB(46, 100, 180)
+    button.AutoButtonColor = not running
+end
+
+local function getSlotStates()
+    local ok, result = pcall(function() return GetSlotState:InvokeServer() end)
+    return (ok and result) and result or nil
+end
+
+local function getWashableItemsList()
+    local ok, result = pcall(function() return GetWashableItems:InvokeServer() end)
+    return (ok and result and result.items) and result.items or {}
+end
+
+local function collectAndClaimSlot(slotNum)
+    local ok, result = pcall(function() return CollectWash:InvokeServer(slotNum) end)
+    if not (ok and result and result.success) then return false end
+    task.wait(0.5)
+    local ok2, result2 = pcall(function() return ClaimWashedItem:InvokeServer(slotNum) end)
+    return ok2 and result2 and result2.success
+end
+
+local function claimWashedSlot(slotNum)
+    local ok, result = pcall(function() return ClaimWashedItem:InvokeServer(slotNum) end)
+    return ok and result and result.success
+end
+
+local function startWashInSlot(slotNum, item)
+    local ok, result = pcall(function() return StartWash:InvokeServer(slotNum, item.guid, item.source, item.vehicleGUID) end)
+    return ok and result and result.success
+end
+
+local function isSlotComplete(slotData)
+    if not slotData or slotData.Washed then return false end
+    if slotData.StartTime and slotData.Duration then
+        return workspace:GetServerTimeNow() >= (slotData.StartTime + slotData.Duration)
+    end
+    return false
+end
+
+local function autoCleanLoop()
+    while isActive and not shouldStop do
+        local slotState = getSlotStates()
+        if not slotState then
+            task.wait(2)
+            continue
+        end
+
+        local unlockedCount = slotState.unlockedCount or 1
+        local slots = slotState.slots or {}
+        local didAction = false
+
+        for i = 1, unlockedCount do
+            local slotData = slots[tostring(i)]
+            if slotData then
+                if slotData.Washed then
+                    if claimWashedSlot(i) then didAction = true task.wait(0.3) end
+                elseif isSlotComplete(slotData) then
+                    if collectAndClaimSlot(i) then didAction = true task.wait(0.3) end
+                end
+            end
+        end
+
+        if didAction then task.wait(0.5) continue end
+
+        local emptySlots = {}
+        for i = 1, unlockedCount do if not slots[tostring(i)] then table.insert(emptySlots, i) end end
+
+        if #emptySlots > 0 then
+            local items = getWashableItemsList()
+            for i, slotNum in ipairs(emptySlots) do
+                if items[i] then
+                    startWashInSlot(slotNum, items[i])
+                    task.wait(0.3)
+                end
+            end
+        end
+        task.wait(1)
+    end
+    setButtonState(false)
+end
+
+button.MouseButton1Click:Connect(function()
+    if isActive then
+        shouldStop = true
+    else
+        shouldStop = false
+        setButtonState(true)
+        task.spawn(autoCleanLoop)
+    end
+end)
