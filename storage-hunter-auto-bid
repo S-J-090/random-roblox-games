@@ -1,0 +1,179 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local DEBOUNCE = 0.5
+local autoBidOn = false
+local lastBidTime = 0
+local heartbeatConn = nil
+local cachedContainer = nil
+
+local gui, panel, toggleBtn, statusLbl
+
+local function findContainer()
+    if cachedContainer and cachedContainer.Parent then
+        return cachedContainer
+    end
+    cachedContainer = nil
+    for _, sg in PlayerGui:GetChildren() do
+        if sg:IsA("ScreenGui") then
+            local c = sg:FindFirstChild("AuctionBiddingContainer", true)
+            if c then
+                cachedContainer = c
+                return c
+            end
+        end
+    end
+    return nil
+end
+
+local bidRemote
+local function getBidRemote()
+    if bidRemote then return bidRemote end
+    local ok, remote = pcall(function()
+        return ReplicatedStorage.Events.Auction.Bid
+    end)
+    if ok and remote then
+        bidRemote = remote
+    end
+    return bidRemote
+end
+
+local function buildUI()
+    if gui then return end
+    gui = Instance.new("ScreenGui")
+    gui.Name = "AutoBidUI"
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 100
+    gui.IgnoreGuiInset = true
+    gui.Parent = PlayerGui
+
+    panel = Instance.new("Frame")
+    panel.Name = "Panel"
+    panel.Size = UDim2.fromOffset(136, 66)
+    panel.Position = UDim2.new(0, 12, 0.5, -33)
+    panel.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    panel.BackgroundTransparency = 0.08
+    panel.BorderSizePixel = 0
+    panel.Visible = true
+    panel.Parent = gui
+    Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 10)
+    local stroke = Instance.new("UIStroke", panel)
+    stroke.Color = Color3.fromRGB(70, 70, 80)
+    stroke.Thickness = 1.5
+
+    toggleBtn = Instance.new("TextButton")
+    toggleBtn.Name = "Toggle"
+    toggleBtn.Size = UDim2.new(1, 0, 0.56, 0)
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+    toggleBtn.TextColor3 = Color3.fromRGB(190, 190, 190)
+    toggleBtn.Text = "AUTO BID: OFF"
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.TextScaled = true
+    toggleBtn.BorderSizePixel = 0
+    toggleBtn.AutoButtonColor = true
+    toggleBtn.Parent = panel
+    Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 8)
+    local pad = Instance.new("UIPadding", toggleBtn)
+    pad.PaddingTop = UDim.new(0.08, 0)
+    pad.PaddingBottom = UDim.new(0.08, 0)
+
+    statusLbl = Instance.new("TextLabel")
+    statusLbl.Name = "Status"
+    statusLbl.Size = UDim2.new(1, 0, 0.4, 0)
+    statusLbl.Position = UDim2.new(0, 0, 0.6, 0)
+    statusLbl.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    statusLbl.BackgroundTransparency = 0.35
+    statusLbl.TextColor3 = Color3.fromRGB(140, 140, 140)
+    statusLbl.Text = "\226\128\148"
+    statusLbl.Font = Enum.Font.Gotham
+    statusLbl.TextScaled = true
+    statusLbl.BorderSizePixel = 0
+    statusLbl.Parent = panel
+    Instance.new("UICorner", statusLbl).CornerRadius = UDim.new(0, 6)
+
+    toggleBtn.MouseButton1Click:Connect(function()
+        autoBidOn = not autoBidOn
+        if autoBidOn then
+            toggleBtn.Text = "AUTO BID: ON"
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 135, 68)
+            toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        else
+            toggleBtn.Text = "AUTO BID: OFF"
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+            toggleBtn.TextColor3 = Color3.fromRGB(190, 190, 190)
+        end
+    end)
+end
+
+local function startLoop()
+    if heartbeatConn then return end
+    heartbeatConn = RunService.RenderStepped:Connect(function()
+        if not autoBidOn then
+            if statusLbl then
+                statusLbl.Text = "Ready"
+                statusLbl.TextColor3 = Color3.fromRGB(140, 140, 140)
+            end
+            return
+        end
+        
+        local container = findContainer()
+        if not container then
+            if statusLbl then statusLbl.Text = "No game UI" end
+            return
+        end
+
+        local now = os.clock()
+        if now - lastBidTime < DEBOUNCE then return end
+        
+        local bidBarRow = container:FindFirstChild("BidBarRow")
+        if not bidBarRow or not bidBarRow.Visible then
+            if statusLbl then
+                statusLbl.Text = "Waiting..."
+                statusLbl.TextColor3 = Color3.fromRGB(100, 200, 255)
+            end
+            return
+        end
+        
+        local track = bidBarRow:FindFirstChild("Track")
+        if not track then return end
+        local cursor = track:FindFirstChild("Cursor")
+        local zone = track:FindFirstChild("BidZone")
+        if not cursor or not zone then return end
+        
+        local trackAbsPos = track.AbsolutePosition.X
+        local trackAbsSize = track.AbsoluteSize.X
+        local cursorX = (cursor.AbsolutePosition.X - trackAbsPos) / trackAbsSize
+        local zoneX = (zone.AbsolutePosition.X - trackAbsPos) / trackAbsSize
+        local zoneW = zone.AbsoluteSize.X / trackAbsSize
+        
+        local inZone = (zoneX <= cursorX + 0.0075) and (cursorX - 0.0075 <= zoneX + zoneW)
+        if not inZone then
+            if statusLbl then
+                statusLbl.Text = "Tracking..."
+                statusLbl.TextColor3 = Color3.fromRGB(200, 200, 100)
+            end
+            return
+        end
+        
+        local zoneCenter = zoneX + zoneW * 0.5
+        local perfectHalf = zoneW * 0.38 * 0.5
+        local isPerfect = perfectHalf >= math.abs(cursorX - zoneCenter)
+        
+        local remote = getBidRemote()
+        if remote then
+            remote:FireServer()
+            lastBidTime = now
+            if statusLbl then
+                statusLbl.Text = isPerfect and "PERFECT!" or "GOOD!"
+                statusLbl.TextColor3 = isPerfect and Color3.fromRGB(0, 255, 130) or Color3.fromRGB(100, 255, 100)
+            end
+        end
+    end)
+end
+
+buildUI()
+startLoop()
