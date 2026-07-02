@@ -15,7 +15,8 @@ local autoPickupOn = false
 local pickupLoopRunning = false
 local Items
 pcall(function()
-	Items = require(ReplicatedStorage.Modules.Items)
+	local itemsModuleClone = ReplicatedStorage.Modules.Items:Clone()
+	Items = require(itemsModuleClone)
 end)
 
 local gui, panel, bidBtn, pickupBtn, statusLbl
