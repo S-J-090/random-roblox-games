@@ -1,14 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
-local Picklock = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Picklock"))
-local Items = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Items"))
-local Safes = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Safes"))
 
 local Events = ReplicatedStorage:WaitForChild("Events")
 local LocksmithFolder = Events:WaitForChild("Locksmith")
@@ -20,280 +13,107 @@ local OpenSafe = LocksmithFolder:WaitForChild("OpenSafe")
 local ClaimItem = LocksmithFolder:WaitForChild("ClaimItem")
 
 local MAX_SLOTS = 3
-local CHECK_INTERVAL = 3
 local LOCKSMITH_POLL_INTERVAL = 5
-local MINIGAME_TIMEOUT = 30
-local CLICK_COOLDOWN = 0.2
-local HIT_CONFIRM_DELAY = 0.2
 
 local isProcessing = false
 
-local function getPlayerPickInfo()
-	local tool = Picklock.GetOwnedForPlayer(LocalPlayer)
-	if not tool then
-		return 0, nil
-	end
-	local toolId = Picklock.GetToolIdFromTool(tool) or Picklock.DefaultToolId
-	return Picklock.GetSafeTier(toolId), toolId
-end
-
-local function getSafeMinTier(itemId)
-	local item = Items[tostring(itemId)]
-	if not item or not item.SafeId then
-		return nil
-	end
-	local safe = Safes[tostring(item.SafeId)]
-	if not safe then
-		return nil
-	end
-	return tonumber(safe.MinPickTier) or 0
-end
-
-local function angularDelta(a, b)
-	local diff = (a - b) % 360
-	if diff > 180 then
-		diff = diff - 360
-	end
-	return math.abs(diff)
-end
-
-local function simulateMinigameInput()
-	pcall(function()
-		VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-	end)
-	task.wait()
-	pcall(function()
-		VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
-	end)
-end
-
-local function autoSolveMinigame()
-	local minigameGui
-	for _ = 1, 40 do
-		minigameGui = PlayerGui:FindFirstChild("PicklockMinigame")
-		if minigameGui then
-			break
-		end
-		task.wait(0.1)
-	end
-	if not minigameGui then
-		return false
-	end
-
-	local overlay = minigameGui:FindFirstChild("Overlay")
-	if not overlay then return false end
-	local ringArea = overlay:FindFirstChild("RingArea")
-	if not ringArea then return false end
-	local indicator = ringArea:FindFirstChild("Indicator")
-	local target = ringArea:FindFirstChild("Target")
-	if not indicator or not target then
-		return false
-	end
-
-	local hits = 0
-	local lastTargetRotation = target.Rotation
-	local canClick = true
-	local finished = false
-
-	local connection
-	connection = RunService.RenderStepped:Connect(function()
-		if finished or not minigameGui.Parent then
-			finished = true
-			return
-		end
-
-		local targetDelta = angularDelta(target.Rotation, lastTargetRotation)
-		if targetDelta > 10 then
-			hits = hits + 1
-			lastTargetRotation = target.Rotation
-			if hits >= 3 then
-				finished = true
-				return
-			end
-			canClick = false
-			task.delay(HIT_CONFIRM_DELAY, function()
-				canClick = true
-			end)
-			return
-		end
-
-		if not canClick then
-			return
-		end
-
-		local delta = angularDelta(indicator.Rotation, target.Rotation)
-		local tolerance = math.max(11, (hits * -5 + 28)) / 2 + 5 - 4
-
-		if delta <= tolerance then
-			canClick = false
-			task.spawn(function()
-				simulateMinigameInput()
-				task.wait(CLICK_COOLDOWN)
-				canClick = true
-			end)
-		end
-	end)
-
-	local startTime = os.clock()
-	while not finished and (os.clock() - startTime) < MINIGAME_TIMEOUT do
-		task.wait(0.1)
-	end
-
-	if connection.Connected then
-		connection:Disconnect()
-	end
-
-	for _ = 1, 30 do
-		if not minigameGui.Parent then
-			break
-		end
-		task.wait(0.1)
-	end
-
-	return hits >= 3
-end
-
 local function getInventorySafes()
-	local ok, result = pcall(function()
-		return GetLockableItems:InvokeServer()
-	end)
-	if not ok or type(result) ~= "table" then
-		return {}
-	end
-	return result.items or {}
+    local ok, result = pcall(function()
+        return GetLockableItems:InvokeServer()
+    end)
+    if not ok or type(result) ~= "table" then
+        return {}
+    end
+    return result.items or {}
 end
 
 local function findEmptySlot()
-	local ok, slotState = pcall(function()
-		return GetSlotState:InvokeServer()
-	end)
-	if not ok or not slotState then
-		return nil
-	end
+    local ok, slotState = pcall(function()
+        return GetSlotState:InvokeServer()
+    end)
+    if not ok or not slotState then
+        return nil
+    end
 
-	local unlockedCount = slotState.unlockedCount or 1
-	local slots = slotState.slots or {}
+    local unlockedCount = slotState.unlockedCount or 1
+    local slots = slotState.slots or {}
 
-	for i = 1, unlockedCount do
-		local slotData = slots[tostring(i)] or slots[i]
-		if not slotData then
-			return i
-		end
-	end
-	return nil
+    for i = 1, unlockedCount do
+        local slotData = slots[tostring(i)] or slots[i]
+        if not slotData then
+            return i
+        end
+    end
+    return nil
 end
 
 local function sendToLocksmith(safeInfo)
-	local slot = findEmptySlot()
-	if not slot then
-		return false
-	end
+    local slot = findEmptySlot()
+    if not slot then
+        return false
+    end
 
-	local ok, result = pcall(function()
-		return StartLocksmithRemote:InvokeServer(slot, safeInfo.guid, safeInfo.source, safeInfo.vehicleGUID)
-	end)
+    local ok, result = pcall(function()
+        return StartLocksmithRemote:InvokeServer(slot, safeInfo.guid, safeInfo.source, safeInfo.vehicleGUID)
+    end)
 
-	return ok and result and result.success or false
+    return ok and result and result.success or false
 end
 
 local function checkAndClaimLocksmith()
-	local ok, slotState = pcall(function()
-		return GetSlotState:InvokeServer()
-	end)
-	if not ok or not slotState then
-		return
-	end
+    local ok, slotState = pcall(function()
+        return GetSlotState:InvokeServer()
+    end)
+    if not ok or not slotState then
+        return
+    end
 
-	local slots = slotState.slots or {}
+    local slots = slotState.slots or {}
 
-	for i = 1, MAX_SLOTS do
-		local slotData = slots[tostring(i)] or slots[i]
-		if slotData then
-			if slotData.RewardItemId or (slotData.RewardDiamonds and slotData.RewardDiamonds > 0) then
-				pcall(function()
-					ClaimItem:InvokeServer(i)
-				end)
-			else
-				local startTime = slotData.StartTime or 0
-				local duration = slotData.Duration or 0
-				local elapsed = workspace:GetServerTimeNow() - startTime
+    for i = 1, MAX_SLOTS do
+        local slotData = slots[tostring(i)] or slots[i]
+        if slotData then
+            if slotData.RewardItemId or (slotData.RewardDiamonds and slotData.RewardDiamonds > 0) then
+                pcall(function()
+                    ClaimItem:InvokeServer(i)
+                end)
+            else
+                local startTime = slotData.StartTime or 0
+                local duration = slotData.Duration or 0
+                local elapsed = workspace:GetServerTimeNow() - startTime
 
-				if elapsed >= duration then
-					local openOk, openResult = pcall(function()
-						return OpenSafe:InvokeServer(i)
-					end)
+                if elapsed >= duration then
+                    local openOk, openResult = pcall(function()
+                        return OpenSafe:InvokeServer(i)
+                    end)
 
-					if openOk and openResult and openResult.success then
-						if openResult.rewardItemId or openResult.rewardDiamonds then
-							task.wait(0.5)
-							pcall(function()
-								ClaimItem:InvokeServer(i)
-							end)
-						end
-					end
-				end
-			end
-		end
-	end
-end
-
-local function processSafes()
-	if isProcessing then
-		return
-	end
-	isProcessing = true
-
-	local safes = getInventorySafes()
-
-	for _, safeInfo in ipairs(safes) do
-		local data = safeInfo.data
-		if data and data.ItemId then
-			local minTier = getSafeMinTier(data.ItemId)
-			local playerTier, toolId = getPlayerPickInfo()
-			local isJammed = data.PicklockLockedOut == true
-
-			if isJammed then
-				sendToLocksmith(safeInfo)
-				task.wait(0.5)
-			elseif minTier ~= nil and toolId and Picklock.CanOpenSafeTier(toolId, minTier) then
-				if _G.__BBOWRunInventoryPicklock then
-					_G.__BBOWRunInventoryPicklock(safeInfo.guid, toolId)
-					local success = autoSolveMinigame()
-					if not success then
-						task.wait(1)
-						sendToLocksmith(safeInfo)
-					end
-					task.wait(0.5)
-				end
-			elseif minTier ~= nil then
-				sendToLocksmith(safeInfo)
-				task.wait(0.5)
-			end
-		end
-	end
-
-	checkAndClaimLocksmith()
-	isProcessing = false
+                    if openOk and openResult and openResult.success then
+                        task.wait(0.5)
+                        pcall(function()
+                            ClaimItem:InvokeServer(i)
+                        end)
+                    end
+                end
+            end
+        end
+    end
 end
 
 task.spawn(function()
-	while true do
-		task.wait(LOCKSMITH_POLL_INTERVAL)
-		pcall(checkAndClaimLocksmith)
-	end
-end)
-
-local initialized = false
-task.spawn(function()
-	task.wait(3)
-	initialized = true
-
-	while true do
-		task.wait(CHECK_INTERVAL)
-		local ok, err = pcall(processSafes)
-		if not ok then
-			warn(err)
-			isProcessing = false
-		end
-	end
+    while true do
+        if not isProcessing then
+            isProcessing = true
+            
+            local safes = getInventorySafes()
+            for _, safeInfo in ipairs(safes) do
+                sendToLocksmith(safeInfo)
+                task.wait(0.5)
+            end
+            
+            checkAndClaimLocksmith()
+            
+            isProcessing = false
+        end
+        task.wait(LOCKSMITH_POLL_INTERVAL)
+    end
 end)
