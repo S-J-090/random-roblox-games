@@ -1,0 +1,21 @@
+local urls = {
+    "https://raw.githubusercontent.com/S-J-090/random-roblox-games/refs/heads/main/storage-hunter-map-teleport",
+    "https://raw.githubusercontent.com/S-J-090/random-roblox-games/refs/heads/main/storage-hunter-auto-stock",
+    "https://raw.githubusercontent.com/S-J-090/random-roblox-games/refs/heads/main/storage-hunter-auto-bid",
+    "https://raw.githubusercontent.com/S-J-090/random-roblox-games/refs/heads/main/storage-hunter-auto-clean",
+    "https://raw.githubusercontent.com/S-J-090/random-roblox-games/refs/heads/main/storage-hunter-auto-lockpick",
+    "https://raw.githubusercontent.com/S-J-090/random-roblox-games/refs/heads/main/storage-hunter-auto-unload"
+}
+
+for _, url in ipairs(urls) do
+    task.spawn(function()
+        local success, result = pcall(function()
+            local scriptData = game:HttpGet(url)
+            local chunk = loadstring(scriptData)
+            if chunk then
+                chunk()
+            end
+        end)
+    end)
+    task.wait(0.5)
+end
