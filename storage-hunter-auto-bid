@@ -14,9 +14,14 @@ local cachedContainer = nil
 local autoPickupOn = false
 local pickupLoopRunning = false
 local Items
-pcall(function()
-	Items = require(ReplicatedStorage.Modules.Items)
-end)
+
+local moduleFolder = ReplicatedStorage:WaitForChild("Modules", 10)
+if moduleFolder then
+	local itemsModule = moduleFolder:WaitForChild("Items", 10)
+	if itemsModule then
+		Items = require(itemsModule)
+	end
+end
 
 local gui, panel, bidBtn, pickupBtn, statusLbl
 
@@ -40,11 +45,12 @@ end
 local bidRemote
 local function getBidRemote()
 	if bidRemote then return bidRemote end
-	local ok, remote = pcall(function()
-		return ReplicatedStorage.Events.Auction.Bid
-	end)
-	if ok and remote then
-		bidRemote = remote
+	local events = ReplicatedStorage:WaitForChild("Events", 5)
+	if events then
+		local auction = events:WaitForChild("Auction", 5)
+		if auction then
+			bidRemote = auction:WaitForChild("Bid", 5)
+		end
 	end
 	return bidRemote
 end
@@ -62,6 +68,7 @@ local function isOwnedByPlayer(model)
 	local owner = model:GetAttribute("Owner")
 	return owner == nil or owner == 0 or owner == LocalPlayer.UserId
 end
+
 local cachedBoxPrompts = {}
 local cachedPickupPrompts = {}
 local promptsInitialized = false
@@ -110,10 +117,10 @@ local function initPromptCache()
 		end
 	end)
 end
+
 local function getValidPrompts()
 	local boxes = {}
 	local pickups = {}
-
 	for _, prompt in ipairs(cachedBoxPrompts) do
 		if prompt.Parent then
 			local model = prompt:FindFirstAncestorOfClass("Model")
@@ -122,7 +129,6 @@ local function getValidPrompts()
 			end
 		end
 	end
-
 	for _, prompt in ipairs(cachedPickupPrompts) do
 		if prompt.Parent then
 			local model = prompt:FindFirstAncestorOfClass("Model")
@@ -131,7 +137,6 @@ local function getValidPrompts()
 			end
 		end
 	end
-
 	return boxes, pickups
 end
 
@@ -171,9 +176,7 @@ end
 local function runPickupLoop()
 	if pickupLoopRunning then return end
 	pickupLoopRunning = true
-
 	initPromptCache()
-
 	task.spawn(function()
 		while autoPickupOn do
 			local character = LocalPlayer.Character
@@ -181,33 +184,26 @@ local function runPickupLoop()
 				task.wait(0.5)
 				continue
 			end
-
 			local startPos = character:GetPivot()
-
 			local boxPrompts, pickupPrompts = getValidPrompts()
-
 			for _, prompt in ipairs(boxPrompts) do
 				if not autoPickupOn then break end
 				teleportAndTrigger(prompt)
 			end
-
 			if #boxPrompts > 0 then
 				task.wait(1.0)
 			end
-
 			local _, currentPickups = getValidPrompts()
 			for _, prompt in ipairs(currentPickups) do
 				if not autoPickupOn then break end
 				teleportAndTrigger(prompt)
 			end
-
 			if autoPickupOn then
 				character = LocalPlayer.Character
 				if character then
 					character:PivotTo(startPos)
 				end
 			end
-
 			task.wait(0.3)
 		end
 		pickupLoopRunning = false
@@ -222,7 +218,6 @@ local function buildUI()
 	gui.DisplayOrder = 100
 	gui.IgnoreGuiInset = true
 	gui.Parent = PlayerGui
-
 	panel = Instance.new("Frame")
 	panel.Name = "Panel"
 	panel.Size = UDim2.fromOffset(136, 102)
@@ -236,18 +231,15 @@ local function buildUI()
 	local stroke = Instance.new("UIStroke", panel)
 	stroke.Color = Color3.fromRGB(70, 70, 80)
 	stroke.Thickness = 1.5
-
 	local layout = Instance.new("UIListLayout", panel)
 	layout.Padding = UDim.new(0, 3)
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
-
 	local panelPad = Instance.new("UIPadding", panel)
 	panelPad.PaddingTop = UDim.new(0, 3)
 	panelPad.PaddingBottom = UDim.new(0, 3)
 	panelPad.PaddingLeft = UDim.new(0, 3)
 	panelPad.PaddingRight = UDim.new(0, 3)
-
 	bidBtn = Instance.new("TextButton")
 	bidBtn.Name = "BidToggle"
 	bidBtn.Size = UDim2.new(1, 0, 0, 30)
@@ -264,7 +256,6 @@ local function buildUI()
 	local bidPad = Instance.new("UIPadding", bidBtn)
 	bidPad.PaddingTop = UDim.new(0.08, 0)
 	bidPad.PaddingBottom = UDim.new(0.08, 0)
-
 	pickupBtn = Instance.new("TextButton")
 	pickupBtn.Name = "PickupToggle"
 	pickupBtn.Size = UDim2.new(1, 0, 0, 30)
@@ -281,7 +272,6 @@ local function buildUI()
 	local pickupPad = Instance.new("UIPadding", pickupBtn)
 	pickupPad.PaddingTop = UDim.new(0.08, 0)
 	pickupPad.PaddingBottom = UDim.new(0.08, 0)
-
 	statusLbl = Instance.new("TextLabel")
 	statusLbl.Name = "Status"
 	statusLbl.Size = UDim2.new(1, 0, 0, 26)
@@ -295,7 +285,6 @@ local function buildUI()
 	statusLbl.LayoutOrder = 3
 	statusLbl.Parent = panel
 	Instance.new("UICorner", statusLbl).CornerRadius = UDim.new(0, 6)
-
 	bidBtn.MouseButton1Click:Connect(function()
 		autoBidOn = not autoBidOn
 		if autoBidOn then
@@ -308,7 +297,6 @@ local function buildUI()
 			bidBtn.TextColor3 = Color3.fromRGB(190, 190, 190)
 		end
 	end)
-
 	pickupBtn.MouseButton1Click:Connect(function()
 		autoPickupOn = not autoPickupOn
 		if autoPickupOn then
@@ -334,16 +322,13 @@ local function startLoop()
 			end
 			return
 		end
-
 		local container = findContainer()
 		if not container then
 			if statusLbl then statusLbl.Text = "No game UI" end
 			return
 		end
-
 		local now = os.clock()
 		if now - lastBidTime < DEBOUNCE then return end
-
 		local bidBarRow = container:FindFirstChild("BidBarRow")
 		if not bidBarRow or not bidBarRow.Visible then
 			if statusLbl then
@@ -352,19 +337,16 @@ local function startLoop()
 			end
 			return
 		end
-
 		local track = bidBarRow:FindFirstChild("Track")
 		if not track then return end
 		local cursor = track:FindFirstChild("Cursor")
 		local zone = track:FindFirstChild("BidZone")
 		if not cursor or not zone then return end
-
 		local trackAbsPos = track.AbsolutePosition.X
 		local trackAbsSize = track.AbsoluteSize.X
 		local cursorX = (cursor.AbsolutePosition.X - trackAbsPos) / trackAbsSize
 		local zoneX = (zone.AbsolutePosition.X - trackAbsPos) / trackAbsSize
 		local zoneW = zone.AbsoluteSize.X / trackAbsSize
-
 		local inZone = (zoneX <= cursorX + 0.0075) and (cursorX - 0.0075 <= zoneX + zoneW)
 		if not inZone then
 			if statusLbl then
@@ -373,11 +355,9 @@ local function startLoop()
 			end
 			return
 		end
-
 		local zoneCenter = zoneX + zoneW * 0.5
 		local perfectHalf = zoneW * 0.38 * 0.5
 		local isPerfect = perfectHalf >= math.abs(cursorX - zoneCenter)
-
 		local remote = getBidRemote()
 		if remote then
 			remote:FireServer()
