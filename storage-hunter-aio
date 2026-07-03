@@ -4,6 +4,7 @@ local urls = {
     "https://raw.githubusercontent.com/S-J-090/random-roblox-games/refs/heads/main/storage-hunter-auto-bid",
     "https://raw.githubusercontent.com/S-J-090/random-roblox-games/refs/heads/main/storage-hunter-auto-clean",
     "https://raw.githubusercontent.com/S-J-090/random-roblox-games/refs/heads/main/storage-hunter-auto-lockpick",
+    "https://raw.githubusercontent.com/S-J-090/random-roblox-games/refs/heads/main/storage-hunter-utilities-script",
     "https://raw.githubusercontent.com/S-J-090/random-roblox-games/refs/heads/main/storage-hunter-auto-unload"
 }
 
