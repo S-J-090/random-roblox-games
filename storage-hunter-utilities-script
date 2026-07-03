@@ -1,0 +1,323 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+
+local TIER_COLORS = {
+	Cobwebbed = Color3.fromRGB(210, 210, 215),
+	Antique = Color3.fromRGB(200, 165, 130),
+	Ancient = Color3.fromRGB(240, 200, 80),
+	Timeless = Color3.fromRGB(80, 220, 240),
+}
+
+local CHECK_INTERVAL = 60 
+local QUICK_SELL_CHECK_INTERVAL = 5 
+local QUICK_SELL_THRESHOLD = 1.25 
+local NOTIF_DURATION = 5 
+local previousStatus = {}
+local activeNotifications = {}
+local function getTimeCapsuleRemotes()
+	local events = ReplicatedStorage:FindFirstChild("Events")
+	if not events then return nil end
+	local tc = events:FindFirstChild("TimeCapsule")
+	return tc
+end
+
+local function getRemote(name)
+	local tc = getTimeCapsuleRemotes()
+	if not tc then return nil end
+	return tc:FindFirstChild(name)
+end
+local function createNotification(title, subtitle, accentColor, clickHint, onClick, notifName)
+	local PlayerGui = LocalPlayer:FindFirstChild("PlayerGui")
+	if not PlayerGui then return end
+	local screenGui = PlayerGui:FindFirstChild("UtilitiesScriptNotifs")
+	if not screenGui then
+		screenGui = Instance.new("ScreenGui")
+		screenGui.Name = "UtilitiesScriptNotifs"
+		screenGui.ResetOnSpawn = false
+		screenGui.DisplayOrder = 100
+		screenGui.Parent = PlayerGui
+	end
+	local notifIndex = #activeNotifications + 1
+	local notifHeight = 60
+	local notifSpacing = 8
+	local startY = 40
+	local notif = Instance.new("TextButton")
+	notif.Name = notifName or "Notification"
+	notif.Size = UDim2.new(0, 360, 0, notifHeight)
+	notif.Position = UDim2.new(0.5, -180, 0, startY + (notifIndex - 1) * (notifHeight + notifSpacing))
+	notif.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+	notif.BackgroundTransparency = 0.05
+	notif.BorderSizePixel = 0
+	notif.AutoButtonColor = true
+	notif.Text = ""
+	notif.ZIndex = 50
+	notif.Parent = screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = notif
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = accentColor
+	stroke.Thickness = 2.5
+	stroke.Transparency = 0.1
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = notif
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Size = UDim2.new(0.55, 0, 0.4, 0)
+	titleLabel.Position = UDim2.new(0.04, 0, 0.1, 0)
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.TextScaled = true
+	titleLabel.TextColor3 = accentColor
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.Text = title
+	titleLabel.ZIndex = 51
+	titleLabel.Parent = notif
+
+	local titleStroke = Instance.new("UIStroke")
+	titleStroke.Color = Color3.fromRGB(0, 0, 0)
+	titleStroke.Thickness = 1
+	titleStroke.Transparency = 0.3
+	titleStroke.Parent = titleLabel
+	local subtitleLabel = Instance.new("TextLabel")
+	subtitleLabel.Size = UDim2.new(0.92, 0, 0.35, 0)
+	subtitleLabel.Position = UDim2.new(0.04, 0, 0.5, 0)
+	subtitleLabel.BackgroundTransparency = 1
+	subtitleLabel.Font = Enum.Font.Gotham
+	subtitleLabel.TextScaled = true
+	subtitleLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+	subtitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	subtitleLabel.Text = subtitle
+	subtitleLabel.ZIndex = 51
+	subtitleLabel.Parent = notif
+	local hintLabel = Instance.new("TextLabel")
+	hintLabel.Size = UDim2.new(0.4, 0, 0.35, 0)
+	hintLabel.Position = UDim2.new(0.58, 0, 0.1, 0)
+	hintLabel.BackgroundTransparency = 1
+	hintLabel.Font = Enum.Font.GothamBold
+	hintLabel.TextScaled = true
+	hintLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+	hintLabel.TextXAlignment = Enum.TextXAlignment.Right
+	hintLabel.Text = clickHint or "Click to Open"
+	hintLabel.ZIndex = 51
+	hintLabel.Parent = notif
+
+	local hintStroke = Instance.new("UIStroke")
+	hintStroke.Color = Color3.fromRGB(0, 0, 0)
+	hintStroke.Thickness = 1
+	hintStroke.Transparency = 0.3
+	hintStroke.Parent = hintLabel
+	notif.Position = UDim2.new(0.5, -180, 0, -notifHeight)
+	TweenService:Create(notif, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Position = UDim2.new(0.5, -180, 0, startY + (notifIndex - 1) * (notifHeight + notifSpacing))
+	}):Play()
+
+	table.insert(activeNotifications, notif)
+
+	local clicked = false
+	local dismissed = false
+
+	local function dismiss()
+		if dismissed then return end
+		dismissed = true
+
+		TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
+			Position = UDim2.new(0.5, -180, 0, -notifHeight),
+			BackgroundTransparency = 1
+		}):Play()
+
+		task.delay(0.35, function()
+		notif:Destroy()
+		for i = #activeNotifications, 1, -1 do
+			if activeNotifications[i] == notif then
+				table.remove(activeNotifications, i)
+			end
+		end
+		for i, n in ipairs(activeNotifications) do
+			if n and n.Parent then
+				TweenService:Create(n, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+					Position = UDim2.new(0.5, -180, 0, startY + (i - 1) * (notifHeight + notifSpacing))
+				}):Play()
+			end
+		end
+		end)
+	end
+	notif.MouseButton1Click:Connect(function()
+		if clicked then return end
+		clicked = true
+
+		if onClick then
+			onClick()
+		end
+
+		dismiss()
+	end)
+	task.delay(NOTIF_DURATION, function()
+		if not clicked then
+			dismiss()
+		end
+	end)
+end
+local function showNotification(slotIdx, tierName, itemName)
+	local tierColor = TIER_COLORS[tierName] or Color3.fromRGB(100, 255, 100)
+	local title = string.upper(tierName) .. " MUTATION!"
+	local subtitle = (itemName or "Your item") .. " - Slot " .. slotIdx
+
+	createNotification(title, subtitle, tierColor, "Click to Claim", function()
+		local collectRemote = getRemote("CollectItem")
+		if collectRemote then
+			pcall(function()
+				collectRemote:InvokeServer(slotIdx)
+			end)
+		end
+	end, "TimeCapsuleNotif_" .. slotIdx)
+end
+local function showQuickSellNotification(ratePercent)
+	local title = "QUICK SELL RATE: +" .. ratePercent .. "%"
+	local subtitle = "Great time to sell your items!"
+	local accentColor = Color3.fromRGB(80, 220, 120)
+
+	createNotification(title, subtitle, accentColor, "Click to Open", function()
+		local ok, UIController = pcall(require, ReplicatedStorage.Modules.UIController)
+		if ok and UIController and UIController.Open then
+			pcall(function()
+				UIController:Open("PawnShop")
+			end)
+		end
+	end, "QuickSellNotif")
+end
+local function getItemName(slotData)
+	if type(slotData) ~= "table" then return nil end
+	local itemData = slotData.ItemData
+	if type(itemData) == "table" then
+		if type(itemData.Name) == "string" and itemData.Name ~= "" then
+			return itemData.Name
+		end
+		local itemId = itemData.ItemId
+		if itemId then
+			local items = ReplicatedStorage:FindFirstChild("Modules")
+			if items then
+				local itemsModule = items:FindFirstChild("Items")
+				if itemsModule then
+					local ok, itemsData = pcall(require, itemsModule)
+					if ok and type(itemsData) == "table" then
+						local entry = itemsData[tostring(itemId)] or itemsData[itemId]
+						if entry and entry.Name then
+							return entry.Name
+						end
+					end
+				end
+				end
+			end
+		end
+	end
+	return nil
+end
+local function startMonitoring()
+	local getSlotStates = getRemote("GetSlotStates")
+	if not getSlotStates then
+		return
+	end
+	local ok, result = pcall(function()
+		return getSlotStates:InvokeServer()
+	end)
+
+	if ok and type(result) == "table" and type(result.slots) == "table" then
+		for k, v in pairs(result.slots) do
+			local slotIdx = tonumber(k)
+			if slotIdx and v and v.ItemGUID then
+				previousStatus[slotIdx] = v.CurrentTier
+			end
+		end
+	end
+	while true do
+		task.wait(CHECK_INTERVAL)
+
+		local ok2, result2 = pcall(function()
+			return getSlotStates:InvokeServer()
+		end)
+
+		if not ok2 or type(result2) ~= "table" or type(result2.slots) ~= "table" then
+			continue
+		end
+
+		for k, v in pairs(result2.slots) do
+			local slotIdx = tonumber(k)
+			if slotIdx and v and v.ItemGUID then
+				local currentTier = v.CurrentTier
+				local prevTier = previousStatus[slotIdx]
+				if currentTier ~= prevTier and currentTier ~= nil then
+					local itemName = getItemName(v)
+					showNotification(slotIdx, currentTier, itemName)
+				end
+
+				previousStatus[slotIdx] = currentTier
+			elseif slotIdx and (not v or not v.ItemGUID) then
+				previousStatus[slotIdx] = nil
+			end
+		end
+	end
+end
+
+local function waitForDataLoaded()
+	while LocalPlayer:GetAttribute("DataLoaded") ~= true do
+		local changed = false
+		local conn
+		conn = LocalPlayer:GetAttributeChangedSignal("DataLoaded"):Connect(function()
+			changed = true
+		end)
+		task.wait(1)
+		conn:Disconnect()
+		if changed then break end
+	end
+end
+
+local previousQuickSellRate = nil
+
+local function startQuickSellMonitoring()
+	local events = ReplicatedStorage:FindFirstChild("Events")
+	if not events then return end
+	local pawn = events:FindFirstChild("Pawn")
+	if not pawn then return end
+	local getPawnState = pawn:FindFirstChild("GetPawnState")
+	if not getPawnState then return end
+
+	while true do
+		task.wait(QUICK_SELL_CHECK_INTERVAL)
+
+		local ok, result = pcall(function()
+			return getPawnState:InvokeServer()
+		end)
+
+		if not ok or type(result) ~= "table" then
+			continue
+		end
+
+		local currentRate = tonumber(result.rate)
+		if not currentRate then
+			continue
+		end
+		if currentRate ~= previousQuickSellRate and currentRate > QUICK_SELL_THRESHOLD then
+			local ratePercent = math.floor((currentRate - 1) * 100 + 0.5)
+			showQuickSellNotification(ratePercent)
+		end
+
+		previousQuickSellRate = currentRate
+	end
+end
+
+task.spawn(function()
+	waitForDataLoaded()
+	task.wait(2)
+	startMonitoring()
+end)
+
+task.spawn(function()
+	waitForDataLoaded()
+	task.wait(3)
+	startQuickSellMonitoring()
+end)
