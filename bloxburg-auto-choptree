@@ -2,7 +2,12 @@ local Players = game:GetService("Players")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
+local VirtualUser = game:GetService("VirtualUser")
 local player = Players.LocalPlayer
+player.Idled:Connect(function()
+VirtualUser:CaptureController()
+VirtualUser:ClickButton2(Vector2.new())
+end)
 local playerGui = player:WaitForChild("PlayerGui")
 local camera = workspace.CurrentCamera
 local screenGui = Instance.new("ScreenGui")
