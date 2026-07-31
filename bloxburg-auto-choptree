@@ -1,0 +1,205 @@
+local Players = game:GetService("Players")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local camera = workspace.CurrentCamera
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FarmTargetGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 50, 0, 50)
+frame.Position = UDim2.new(0.5, -25, 0.5, -25)
+frame.BackgroundColor3 = Color3.new(0, 0, 0)
+frame.BackgroundTransparency = 0.5
+frame.Active = true
+frame.Parent = screenGui
+
+local icon = Instance.new("TextLabel")
+icon.Size = UDim2.new(1, 0, 1, 0)
+icon.BackgroundTransparency = 1
+icon.Text = "+"
+icon.TextColor3 = Color3.new(1, 1, 1)
+icon.TextScaled = true
+icon.Parent = frame
+
+local dragging = false
+local dragInput, dragStart, startPos
+
+local function update(input)
+	local delta = input.Position - dragStart
+	frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+frame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		dragStart = input.Position
+		startPos = frame.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+frame.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		dragInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		update(input)
+	end
+end)
+
+local autoFarming = false
+local farmDistance = 5 
+
+local function getTreesFolder()
+	local env = workspace:FindFirstChild("Environment")
+	if not env then return nil end
+	local foliage = env:FindFirstChild("Foliage")
+	if not foliage then return nil end
+	local trees = foliage:FindFirstChild("Trees")
+	if not trees then return nil end
+	
+	return trees:FindFirstChild("Spruce Tree")
+end
+
+local function getNearestTree()
+	local folder = getTreesFolder()
+	if not folder then return nil end
+
+	local character = player.Character
+	if not character or not character:FindFirstChild("HumanoidRootPart") then return nil end
+	local rootPart = character.HumanoidRootPart
+
+	local nearestTree = nil
+	local shortestDistance = math.huge
+
+	for _, obj in pairs(folder:GetChildren()) do
+		if obj:IsA("Model") and obj.Name == "Spruce Tree" then
+			local body = obj:FindFirstChild("Body")
+			if body and body:IsA("BasePart") and body.Position.Y > 115 then
+				local treePos = obj:GetPivot().Position
+				local dist = (Vector3.new(rootPart.Position.X, 0, rootPart.Position.Z) - Vector3.new(treePos.X, 0, treePos.Z)).Magnitude
+
+				if dist < shortestDistance then
+					shortestDistance = dist
+					nearestTree = obj
+				end
+			end
+		end
+	end
+
+	return nearestTree
+end
+
+local function autoFarmLoop()
+	while autoFarming do
+		local character = player.Character
+		if not character or not character:FindFirstChild("Humanoid") or not character:FindFirstChild("HumanoidRootPart") then
+			task.wait(1)
+			continue
+		end
+		
+		local humanoid = character.Humanoid
+		local rootPart = character.HumanoidRootPart
+		
+		local targetTree = getNearestTree() 
+		
+		if targetTree then
+			local body = targetTree:FindFirstChild("Body")
+			if not body then continue end
+			
+			local treePos = targetTree:GetPivot().Position
+			
+			humanoid:MoveTo(treePos)
+			
+			local moveTimeout = 0
+			while targetTree.Parent and autoFarming do
+				local currentDist = (Vector3.new(rootPart.Position.X, 0, rootPart.Position.Z) - Vector3.new(targetTree:GetPivot().Position.X, 0, targetTree:GetPivot().Position.Z)).Magnitude
+				
+				if currentDist <= farmDistance then
+					break
+				end
+				
+				humanoid:MoveTo(targetTree:GetPivot().Position)
+				task.wait(0.1)
+				
+				moveTimeout += 0.1
+				if moveTimeout > 15 then 
+					break
+				end 
+			end
+			
+			humanoid:MoveTo(rootPart.Position)
+			
+			local guiInset = GuiService:GetGuiInset()
+			local targetX = frame.AbsolutePosition.X + (frame.AbsoluteSize.X / 2)
+			local targetY = frame.AbsolutePosition.Y + (frame.AbsoluteSize.Y / 2) + guiInset.Y
+			
+			local treeChopped = false
+			local initialY = body.Position.Y
+			local cframeConnection = body:GetPropertyChangedSignal("CFrame"):Connect(function()
+				if body.Position.Y ~= initialY then
+					treeChopped = true
+				end
+			end)
+			while targetTree.Parent and autoFarming and not treeChopped do
+				if body.Position.Y ~= initialY then
+					treeChopped = true
+					break
+				end
+				
+				local currentTreePos = targetTree:GetPivot().Position
+				
+				camera.CFrame = CFrame.lookAt(camera.CFrame.Position, currentTreePos)
+				rootPart.CFrame = CFrame.lookAt(rootPart.Position, Vector3.new(currentTreePos.X, rootPart.Position.Y, currentTreePos.Z))
+				
+				VirtualInputManager:SendMouseButtonEvent(targetX, targetY, 0, true, game, 1)
+				task.wait(0.01)
+				VirtualInputManager:SendMouseButtonEvent(targetX, targetY, 0, false, game, 1)
+				
+				task.wait(0.05)
+			end
+			if cframeConnection then
+				cframeConnection:Disconnect()
+			end
+			
+		else
+			task.wait(1)
+		end
+		
+		task.wait(0.1)
+	end
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	
+	if input.KeyCode == Enum.KeyCode.F then
+		autoFarming = not autoFarming
+		
+		if autoFarming then
+			frame.Visible = false
+			task.spawn(autoFarmLoop)
+		else
+			frame.Visible = true
+			local char = player.Character
+			if char and char:FindFirstChild("Humanoid") then
+				char.Humanoid:MoveTo(char.HumanoidRootPart.Position)
+			end
+		end
+	end
+end)
