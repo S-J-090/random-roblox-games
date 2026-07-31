@@ -78,7 +78,7 @@ local shortestDistance = math.huge
 for _, obj in pairs(folder:GetChildren()) do
 if obj:IsA("Model") and obj.Name == "Spruce Tree" then
 local body = obj:FindFirstChild("Body")
-if body and body:IsA("BasePart") and body.Position.Y > 115 then
+if body and body:IsA("BasePart") and body.Position.Y > 115 and body.Position.Y <= 141 then
 local treePos = obj:GetPivot().Position
 local dist = (Vector3.new(rootPart.Position.X, 0, rootPart.Position.Z) - Vector3.new(treePos.X, 0, treePos.Z)).Magnitude
 if dist < shortestDistance then
