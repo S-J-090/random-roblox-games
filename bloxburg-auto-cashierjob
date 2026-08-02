@@ -179,6 +179,7 @@ local function executeOrderQueue()
     end
     clickBox(boxes["Top Bun"])
     clickBox(boxes["Tab 2"])
+	task.wait(0.2)
     while #currentOrder.frame2 == 0 do
         if not autoFarming or not currentCustomer or not currentCustomer.Parent then return end
         task.wait(0.1)
@@ -198,6 +199,7 @@ local function executeOrderQueue()
     end
     if #currentOrder.frame3 > 0 then
         for _, info in ipairs(currentOrder.frame3) do
+		task.wait(0.2)
             clickBox(boxes[info.item])
             if info.size then 
                 clickBox(boxes["Size " .. info.size]) 
