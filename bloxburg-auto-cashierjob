@@ -26,6 +26,7 @@ local boxNames = {
     "Item 1", "Item 2", "Item 3", 
     "Size S", "Size M", "Size L",
     "Finished"
+}
 local gui = Instance.new("ScreenGui")
 gui.Name = "BurgerAutoFarmUI"
 gui.ResetOnSpawn = false
