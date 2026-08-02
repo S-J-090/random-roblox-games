@@ -1,0 +1,314 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+local HttpService = game:GetService("HttpService")
+local player = Players.LocalPlayer
+local configFileName = "BurgerFarmPositions.json"
+local mapToBox = {
+    ["14358878251"] = "Onion",
+    ["14358880695"] = "Cheese",
+    ["14358866788"] = "Meat",
+    ["14358886220"] = "Plant",
+    ["14358884748"] = "Tomato",
+    ["14358865402"] = "Lettuce",
+    ["14467423053"] = "Item 1", -- Fries
+    ["14467425084"] = "Item 1", -- Fountain Drink
+    ["14467509651"] = "Item 2", -- Mozzarella
+    ["9555980177"]  = "Item 2", -- Juice
+    ["14467511580"] = "Item 3", -- Onion Rings
+    ["1588110682"]  = "Item 3", -- Milkshake
+}
+local boxNames = {
+    "Bottom Bun", "Top Bun", "Onion", "Cheese", "Meat", "Plant", "Tomato", "Lettuce",
+    "Tab 2", "Tab 3",
+    "Item 1", "Item 2", "Item 3", 
+    "Size S", "Size M", "Size L",
+    "Finished"
+local gui = Instance.new("ScreenGui")
+gui.Name = "BurgerAutoFarmUI"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+local masterPanel = Instance.new("Frame")
+masterPanel.Size = UDim2.new(0, 200, 0, 100)
+masterPanel.Position = UDim2.new(0, 20, 0.5, -50)
+masterPanel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+masterPanel.Parent = gui
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0.9, 0, 0.4, 0)
+toggleBtn.Position = UDim2.new(0.05, 0, 0.1, 0)
+toggleBtn.Text = "Auto Farm: OFF"
+toggleBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+toggleBtn.Parent = masterPanel
+local saveBtn = Instance.new("TextButton")
+saveBtn.Size = UDim2.new(0.9, 0, 0.4, 0)
+saveBtn.Position = UDim2.new(0.05, 0, 0.55, 0)
+saveBtn.Text = "Save Box Positions"
+saveBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+saveBtn.TextColor3 = Color3.new(1, 1, 1)
+saveBtn.Parent = masterPanel
+local function makeDraggable(frame)
+    local dragging = false
+    local dragInput, dragStart, startPos
+    
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    frame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+end
+makeDraggable(masterPanel)
+local boxes = {}
+local function createBox(name, index)
+    local box = Instance.new("Frame")
+    box.Size = UDim2.new(0, 40, 0, 40)
+    box.Position = UDim2.new(0, 250 + (index % 5) * 50, 0, 100 + math.floor(index / 5) * 50)
+    box.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    box.BackgroundTransparency = 0.3
+    box.Active = true
+    box.Parent = gui
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = name
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.TextScaled = true
+    label.Parent = box
+    makeDraggable(box)
+    boxes[name] = box
+end
+for i, name in ipairs(boxNames) do
+    createBox(name, i - 1)
+end
+local function saveConfig()
+    local data = {}
+    for name, box in pairs(boxes) do
+        data[name] = {
+            XScale = box.Position.X.Scale, XOffset = box.Position.X.Offset,
+            YScale = box.Position.Y.Scale, YOffset = box.Position.Y.Offset
+        }
+    end
+    if writefile then
+        writefile(configFileName, HttpService:JSONEncode(data))
+        saveBtn.Text = "Saved!"
+        task.wait(1)
+        saveBtn.Text = "Save Box Positions"
+    end
+end
+local function loadConfig()
+    if isfile and isfile(configFileName) and readfile then
+        local success, decoded = pcall(function()
+            return HttpService:JSONDecode(readfile(configFileName))
+        end)
+        if success and type(decoded) == "table" then
+            for name, pos in pairs(decoded) do
+                if boxes[name] then
+                    boxes[name].Position = UDim2.new(pos.XScale, pos.XOffset, pos.YScale, pos.YOffset)
+                end
+            end
+        end
+    end
+end
+loadConfig()
+saveBtn.MouseButton1Click:Connect(saveConfig)
+local autoFarming = false
+local currentCustomer = nil
+local isProcessingOrder = false
+local hasFinishedOrder = false
+local lastUpdateTime = 0
+local currentOrder = {
+    frame1 = {},
+    frame2 = {},
+    frame3 = {}
+}
+local readIcons = {}
+toggleBtn.MouseButton1Click:Connect(function()
+    autoFarming = not autoFarming
+    toggleBtn.Text = autoFarming and "Auto Farm: ON" or "Auto Farm: OFF"
+    toggleBtn.BackgroundColor3 = autoFarming and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
+    for _, box in pairs(boxes) do
+        box.Visible = not autoFarming
+    end
+end)
+local function extractID(imageString)
+    if type(imageString) ~= "string" then return nil end
+    local bestMatch = ""
+    for match in string.gmatch(imageString, "%d+") do
+        if string.len(match) > string.len(bestMatch) then
+            bestMatch = match
+        end
+    end
+    return bestMatch ~= "" and bestMatch or nil
+end
+local function clickBox(box)
+    if not box or not autoFarming then return end
+    local guiInset = GuiService:GetGuiInset()
+    local targetX = box.AbsolutePosition.X + (box.AbsoluteSize.X / 2)
+    local targetY = box.AbsolutePosition.Y + (box.AbsoluteSize.Y / 2) + guiInset.Y
+    VirtualInputManager:SendMouseButtonEvent(targetX, targetY, 0, true, game, 1)
+    task.wait(0.05)
+    VirtualInputManager:SendMouseButtonEvent(targetX, targetY, 0, false, game, 1)
+    task.wait(0.5)
+end
+local function executeOrderQueue()
+	task.wait(0.2)
+    clickBox(boxes["Bottom Bun"])
+    for _, item in ipairs(currentOrder.frame1) do
+        clickBox(boxes[item])
+    end
+    clickBox(boxes["Top Bun"])
+    clickBox(boxes["Tab 2"])
+    while #currentOrder.frame2 == 0 do
+        if not autoFarming or not currentCustomer or not currentCustomer.Parent then return end
+        task.wait(0.1)
+    end
+    for _, info in ipairs(currentOrder.frame2) do
+        clickBox(boxes[info.item])
+        if info.size then 
+            clickBox(boxes["Size " .. info.size]) 
+        end
+    end
+    clickBox(boxes["Tab 3"])
+    local waitTimer = 0
+    while #currentOrder.frame3 == 0 and waitTimer < 2 do
+        if not autoFarming or not currentCustomer or not currentCustomer.Parent then return end
+        task.wait(0.1)
+        waitTimer += 0.1
+    end
+    if #currentOrder.frame3 > 0 then
+        for _, info in ipairs(currentOrder.frame3) do
+            clickBox(boxes[info.item])
+            if info.size then 
+                clickBox(boxes["Size " .. info.size]) 
+            end
+        end
+    end
+    clickBox(boxes["Finished"])
+end
+local function resetState(newCustomer)
+    currentCustomer = newCustomer
+    currentOrder = { frame1 = {}, frame2 = {}, frame3 = {} }
+    readIcons = {}
+    lastUpdateTime = tick()
+    isProcessingOrder = false
+    hasFinishedOrder = false
+end
+resetState(nil) 
+RunService.RenderStepped:Connect(function()
+    local character = player.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    if currentCustomer then
+        if not currentCustomer.Parent then
+            resetState(nil)
+        else
+            local head = currentCustomer:FindFirstChild("Head")
+            if not head or (head.Position - rootPart.Position).Magnitude > 20 then
+                resetState(nil)
+            end
+        end
+    end
+    if not currentCustomer then
+        local spawnedChars = workspace:FindFirstChild("_game") and workspace._game:FindFirstChild("SpawnedCharacters")
+        if spawnedChars then
+            local nearest, minDistance = nil, 20 
+            for _, char in ipairs(spawnedChars:GetChildren()) do
+                if char.Name == "BloxBurgersCustomer" then
+                    local head = char:FindFirstChild("Head")
+                    if head and head:FindFirstChild("ChatBubble") then
+                        local dist = (head.Position - rootPart.Position).Magnitude
+                        if dist < minDistance then
+                            minDistance = dist
+                            nearest = char
+                        end
+                    end
+                end
+            end
+            if nearest then resetState(nearest) end
+        end
+    end
+    if not currentCustomer or not autoFarming then return end
+    local head = currentCustomer:FindFirstChild("Head")
+    local chatBubble = head and head:FindFirstChild("ChatBubble")
+    local body = chatBubble and chatBubble:FindFirstChild("Body")
+    local iconFrame = body and body:FindFirstChild("IconFrame")
+    if iconFrame then
+        local orderUpdated = false
+        for i = 1, 3 do
+            local frameStr = tostring(i)
+            local frame = iconFrame:FindFirstChild(frameStr)
+            if frame then
+                for _, child in ipairs(frame:GetChildren()) do
+                    if child:IsA("ImageLabel") and child.Name == "Icon" and not readIcons[child] then
+                        local parsedID = extractID(child.Image)
+                        if parsedID then
+                            local mappedBox = mapToBox[parsedID]
+                            if mappedBox then
+                                if i == 1 then
+                                    local count = 1
+                                    local amountImg = child:FindFirstChild("Amount")
+                                    if amountImg and amountImg:FindFirstChild("TextLabel") then
+                                        local amtMatch = string.match(amountImg.TextLabel.Text, "%d+")
+                                        if amtMatch then count = tonumber(amtMatch) end
+                                    end
+                                    for _ = 1, count do
+                                        table.insert(currentOrder.frame1, mappedBox)
+                                    end
+                                else
+                                    local sizeChar = nil
+                                    local sizeImg = child:FindFirstChild("Size")
+                                    if sizeImg and sizeImg:FindFirstChild("TextLabel") then
+                                        local txt = sizeImg.TextLabel.Text
+                                        if string.find(txt, "S") then sizeChar = "S"
+                                        elseif string.find(txt, "M") then sizeChar = "M"
+                                        elseif string.find(txt, "L") then sizeChar = "L"
+                                        end
+                                    end
+                                    table.insert(currentOrder["frame" .. frameStr], {
+                                        item = mappedBox,
+                                        size = sizeChar
+                                    })
+                                end
+                                readIcons[child] = true
+                                orderUpdated = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if orderUpdated then
+            lastUpdateTime = tick()
+        end
+    end
+    if not isProcessingOrder and not hasFinishedOrder then
+        if (tick() - lastUpdateTime > 1.0) and #currentOrder.frame1 > 0 then
+            isProcessingOrder = true
+            task.spawn(function()
+                executeOrderQueue()
+                hasFinishedOrder = true
+                isProcessingOrder = false
+            end)
+        end
+    end
+end)
