@@ -1,0 +1,231 @@
+local Players = game:GetService("Players")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
+local player = Players.LocalPlayer
+local stations = {
+    Cup = { pos = Vector3.new(-263.72, 4.19, -234.35), model = "IceCreamCups" },
+    Chocolate = { pos = Vector3.new(-264.57, 4.19, -229.61), model = "Chocolate" },
+    Vanilla = { pos = Vector3.new(-264.57, 4.19, -231.38), model = "Vanilla" },
+    Strawberry = { pos = Vector3.new(-263.91, 4.19, -227.57), model = "Strawberry" },
+    Sprinkle = { pos = Vector3.new(-262.01, 4.19, -236.84), model = "Sprinkles" },
+    Caramel = { pos = Vector3.new(-260.10, 4.19, -237.97), model = "Caramel" },
+    Nuts = { pos = Vector3.new(-257.57, 4.19, -238.41), model = "Nuts" }
+}
+local idlePos = Vector3.new(-252.92, 4.19, -221.85)
+local gui = Instance.new("ScreenGui")
+gui.Name = "IceCreamAutoFarmUI"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 200, 0, 50)
+toggleBtn.Position = UDim2.new(0, 20, 0.5, -100)
+toggleBtn.Text = "Ice Cream Farm: OFF"
+toggleBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+toggleBtn.TextSize = 16
+toggleBtn.Font = Enum.Font.SourceSansBold
+toggleBtn.Parent = gui
+local dragging, dragInput, dragStart, startPos
+toggleBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = toggleBtn.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+toggleBtn.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        toggleBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+local autoFarming = false
+local idleTimer = 0
+local processedCustomers = {}
+toggleBtn.MouseButton1Click:Connect(function()
+    autoFarming = not autoFarming
+    toggleBtn.Text = autoFarming and "Ice Cream Farm: ON" or "Ice Cream Farm: OFF"
+    toggleBtn.BackgroundColor3 = autoFarming and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
+    if not autoFarming then idleTimer = 0 end
+end)
+local function extractID(imageString)
+    return type(imageString) == "string" and string.match(imageString, "%d+") or nil
+end
+local function getTableObject(name)
+    local env = workspace:FindFirstChild("Environment")
+    if env and env:FindFirstChild("Locations") and env.Locations:FindFirstChild("Beach") then
+        local shop = env.Locations.Beach:FindFirstChild("BensIceCream")
+        if shop and shop:FindFirstChild("Interior") and shop.Interior:FindFirstChild("TableObjects") then
+            return shop.Interior.TableObjects:FindFirstChild(name)
+        end
+    end
+    return nil
+end
+local function walkTo(targetPos, reachDist)
+    reachDist = reachDist or 1.5
+    local character = player.Character
+    local humanoid = character and character:FindFirstChild("Humanoid")
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not rootPart then return end
+    humanoid:MoveTo(targetPos)
+    local loops = 0
+    while loops < 100 and autoFarming do
+        local dist = (Vector3.new(rootPart.Position.X, 0, rootPart.Position.Z) - Vector3.new(targetPos.X, 0, targetPos.Z)).Magnitude
+        if dist <= reachDist then break end
+        
+        task.wait(0.1)
+        loops += 1
+        if loops % 5 == 0 then humanoid:MoveTo(targetPos) end 
+    end
+end
+local function lookAtAndPressE(targetEntity)
+    if not targetEntity then return end
+    local character = player.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    local targetPos = targetEntity:IsA("Model") and targetEntity:GetPivot().Position or targetEntity.Position
+    local oldCameraMode = player.CameraMode
+    player.CameraMode = Enum.CameraMode.LockFirstPerson
+    task.wait(0.2)
+    local camera = workspace.CurrentCamera
+    camera.CFrame = CFrame.lookAt(camera.CFrame.Position, targetPos)
+    rootPart.CFrame = CFrame.lookAt(rootPart.Position, Vector3.new(targetPos.X, rootPart.Position.Y, targetPos.Z))
+    task.wait(0.2)
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+    task.wait(0.1)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+    
+    task.wait(0.5)
+    player.CameraMode = oldCameraMode
+end
+local function getNearestCustomer()
+    local character = player.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    local spawnedChars = workspace:FindFirstChild("_game") and workspace._game:FindFirstChild("SpawnedCharacters")
+    if not rootPart or not spawnedChars then return nil end
+    local nearest, minDistance = nil, 200 
+    for _, char in ipairs(spawnedChars:GetChildren()) do
+        if char.Name == "BensIceCreamCustomer" then
+            local head = char:FindFirstChild("Head")
+            if head and head:FindFirstChild("ChatBubble") then
+                local dist = (head.Position - rootPart.Position).Magnitude
+                if dist < minDistance then
+                    minDistance = dist
+                    nearest = char
+                end
+            end
+        end
+    end
+    return nearest
+end
+local function getOrder(customer)
+    local head = customer:FindFirstChild("Head")
+    if not head then return nil end
+    local chatBubble = head:FindFirstChild("ChatBubble")
+    if not chatBubble then return nil end
+    local body = chatBubble:FindFirstChild("Body")
+    if not body then return nil end
+    local iconFrame = body:FindFirstChild("IconFrame")
+    if not iconFrame then return nil end
+    local flavors = {}
+    local toppings = {}
+    local foundItems = false
+    for _, child in ipairs(iconFrame:GetDescendants()) do
+        if child:IsA("ImageLabel") and child.Name == "Icon" then
+            local id = extractID(child.Image)
+            if id == "2037427845" then
+            elseif id == "2132263837" then
+                foundItems = true
+                local color = child.ImageColor3
+                local r, g, b = color.R * 255, color.G * 255, color.B * 255
+                
+                local dChoc = math.abs(r - 108) + math.abs(g - 88) + math.abs(b - 75)
+                local dVan = math.abs(r - 255) + math.abs(g - 255) + math.abs(b - 204)
+                local dStraw = math.abs(r - 212) + math.abs(g - 144) + math.abs(b - 189)
+                
+                if dChoc <= dVan and dChoc <= dStraw then
+                    table.insert(flavors, "Chocolate")
+                elseif dVan <= dChoc and dVan <= dStraw then
+                    table.insert(flavors, "Vanilla")
+                else
+                    table.insert(flavors, "Strawberry")
+                end
+            elseif id == "2132313170" then
+                foundItems = true
+                table.insert(toppings, "Sprinkle")
+            elseif id == "455528053" then
+                foundItems = true
+                table.insert(toppings, "Caramel")
+            elseif id == "22360490" then
+                foundItems = true
+                table.insert(toppings, "Nuts")
+            end
+        end
+    end
+    if foundItems then
+        return { flavors = flavors, toppings = toppings }
+    end
+    return nil
+end
+local function processOrder(order, customer)
+    walkTo(stations.Cup.pos, 1.5)
+    lookAtAndPressE(getTableObject(stations.Cup.model))
+    for _, flavor in ipairs(order.flavors) do
+        local station = stations[flavor]
+        if station then
+            walkTo(station.pos, 1.5)
+            lookAtAndPressE(getTableObject(station.model))
+        end
+    end
+    for _, topping in ipairs(order.toppings) do
+        local station = stations[topping]
+        if station then
+            walkTo(station.pos, 1.5)
+            lookAtAndPressE(getTableObject(station.model))
+        end
+    end
+    local head = customer:FindFirstChild("Head")
+    if head then
+        walkTo(head.Position, 5.5)
+        lookAtAndPressE(head)
+    end
+end
+task.spawn(function()
+    while true do
+        task.wait(0.2)
+        if not autoFarming then continue end
+        for cust, _ in pairs(processedCustomers) do
+            if not cust.Parent then
+                processedCustomers[cust] = nil
+            end
+        end
+        local customer = getNearestCustomer()
+        if customer then
+            idleTimer = 0
+            if not processedCustomers[customer] then
+                local order = getOrder(customer)
+                if order then
+                    processOrder(order, customer)
+                    processedCustomers[customer] = true 
+                    task.wait(1.5) 
+                end
+            end
+        else
+            idleTimer += 0.2
+            if idleTimer >= 5 then
+                walkTo(idlePos, 1.5) 
+                
+                while not getNearestCustomer() and autoFarming do
+                    task.wait(0.5)
+                end
+                idleTimer = 0
+            end
+        end
+    end
+end)
