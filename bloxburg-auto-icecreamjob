@@ -190,12 +190,16 @@ local function processOrder(order, customer)
             lookAtAndPressE(getTableObject(station.model))
         end
     end
-    local head = customer:FindFirstChild("Head")
+local head = customer:FindFirstChild("Head")
     if head then
         walkTo(head.Position, 5.5)
-        lookAtAndPressE(head)
+        local retries = 0
+        while customer and customer.Parent and getOrder(customer) and retries < 3 do
+            lookAtAndPressE(head)
+            task.wait(2)
+            retries += 1
+        end
     end
-end
 task.spawn(function()
     while true do
         task.wait(0.2)
