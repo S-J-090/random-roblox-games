@@ -144,11 +144,9 @@ local function getOrder(customer)
                 foundItems = true
                 local color = child.ImageColor3
                 local r, g, b = color.R * 255, color.G * 255, color.B * 255
-                
                 local dChoc = math.abs(r - 108) + math.abs(g - 88) + math.abs(b - 75)
                 local dVan = math.abs(r - 255) + math.abs(g - 255) + math.abs(b - 204)
                 local dStraw = math.abs(r - 212) + math.abs(g - 144) + math.abs(b - 189)
-                
                 if dChoc <= dVan and dChoc <= dStraw then
                     table.insert(flavors, "Chocolate")
                 elseif dVan <= dChoc and dVan <= dStraw then
@@ -224,7 +222,6 @@ task.spawn(function()
             idleTimer += 0.2
             if idleTimer >= 5 then
                 walkTo(idlePos, 1.5) 
-                
                 while not getNearestCustomer() and autoFarming do
                     task.wait(0.5)
                 end
@@ -233,3 +230,4 @@ task.spawn(function()
         end
     end
 end)
+end
