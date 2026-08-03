@@ -198,6 +198,7 @@ local head = customer:FindFirstChild("Head")
             retries += 1
         end
     end
+end
 task.spawn(function()
     while true do
         task.wait(0.2)
@@ -230,4 +231,3 @@ task.spawn(function()
         end
     end
 end)
-end
